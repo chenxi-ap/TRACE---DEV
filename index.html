@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -20,10 +21,6 @@
   --shadow: 0 2px 8px rgba(0,0,0,0.3);
   --transition: 0.2s ease;
 }
-
-/* ===== test github source control ===== */
-
-
 html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg-primary); color: var(--text-primary); font-size: 13px; line-height: 1.5; overflow: hidden; }
 button { cursor: pointer; font-family: inherit; font-size: 12px; border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-primary); padding: 6px 12px; border-radius: var(--radius); transition: var(--transition); }
 button:hover { background: var(--border); border-color: var(--border-light); }
@@ -253,6 +250,63 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 #path-modal.active { display: flex; }
 .path-content { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; max-width: 400px; width: 90%; }
 
+/* Annotations */
+.annotation-box {
+  position: absolute;
+  z-index: 100;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  min-width: 80px;
+  min-height: 30px;
+  cursor: move;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-primary);
+  word-wrap: break-word;
+  backdrop-filter: blur(4px);
+  resize: both;
+  overflow: auto;
+}
+.annotation-box:hover { border-color: var(--accent); }
+.annotation-box:hover .annotation-controls { display: flex; }
+.annotation-controls {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  gap: 2px;
+  flex-wrap: wrap;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 3px 4px;
+  min-width: 100%;
+}
+.annotation-box::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  height: 8px;
+  display: none;
+}
+.annotation-box:hover::before { display: block; }
+.annotation-controls button {
+  width: 22px; height: 22px; padding: 0; font-size: 10px;
+  border-radius: 3px; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  color: var(--text-secondary); cursor: pointer;
+}
+.annotation-controls button:hover { color: var(--text-primary); border-color: var(--accent); background: var(--accent-dim); }
+.annotation-controls button.active { background: var(--accent-dim); color: #fff; border-color: var(--accent); }
+.annotation-controls .ctrl-divider { width: 1px; height: 18px; background: var(--border); margin: 2px 2px; }
+.annotation-text { outline: none; white-space: pre-wrap; line-height: 1.5; min-height: 20px; }
+.annotation-text:empty::before { content: 'Type here...'; color: var(--text-muted); }
+.annotation-img { max-width: 100%; border-radius: 3px; margin-top: 4px; display: block; cursor: default; }
+
 /* Responsive */
 @media (max-width: 1200px) {
   :root { --sidebar-width: 240px; --anomaly-width: 260px; }
@@ -266,8 +320,8 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 </head>
 <body>
 <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose/cytoscape-fcose.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <script>
 // (JavaScript)
@@ -296,6 +350,7 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   selectedElements: new Set(),
   nodeIcons: {},        // entity -> uploaded image dataURL
   nodeShapes: {},
+  nodeColors: {},       // entity -> color hex
   labelPosition: 'bottom', // top | center | bottom
   roundNumbers: true,
   showTimeline: false,
@@ -321,6 +376,8 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   edgeFontBold: false,                                                                                                                                              
   edgeFontItalic: false,
   showLegend: true,
+  bgColor: '#0d1117',
+  annotations: [],
   summaryText: '',
   exportFields: { caseRef: '', watermark: '', header: 'Transaction Intelligence Report' },
   wizardStep: 'upload', // upload | sheetSelect | preview | mapper | chart
@@ -335,8 +392,11 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   _groupCounter: 0,
   shiftSelected: new Set(),
   _persistentPositions: {},
+  _skipPositionRestore: false,
+  layoutName: 'fcose',
+  layoutRootEntity: null,
+  _preTimelineLayout: null,
 };
-
 const DEFAULTS = {                                                                                                                                                
     nodeShape: 'ellipse', nodeSize: 45, nodeColor: '#58a6ff',                                                                                                       
     edgeColor: '#58a6ff', showArrows: true, arrowSize: 2,                                                                                                           
@@ -347,6 +407,187 @@ const DEFAULTS = {
     edgeFontSize: 10, edgeFontColor: '#8b949e', edgeFontBold: false, edgeFontItalic: false,                                                                                                       
   };
 
+/* ==========================================================================
+   LAYOUT DEFINITIONS
+   ========================================================================== */
+const LAYOUT_DEFS = {
+  fcose: {
+    label: 'Force-Directed (Clustered)', icon: '◎',
+    get: (n) => ({
+      name: 'fcose', animate: false, quality: 'proof',
+      nodeDimensionsIncludeLabels: true,
+      nodeRepulsion: () => n > 50 ? 6000 : 10000,
+      idealEdgeLength: () => n > 50 ? 100 : 150,
+      edgeElasticity: () => 0.45,
+      gravity: 0.15, gravityRange: 1.5, numIter: 2500,
+      padding: 50, randomize: true, packComponents: true,
+      componentSpacing: 80, tile: true,
+    }),
+  },
+  concentric: {
+    label: 'Concentric (Hub Detection)', icon: '⊚',
+    get: (n) => ({
+      name: 'concentric', animate: false, nodeDimensionsIncludeLabels: true,
+      concentric: (node) => node.degree(),
+      levelWidth: () => Math.max(1, Math.round(Math.sqrt(n) / 3)),
+      minNodeSpacing: 60, padding: 40,
+    }),
+  },
+
+  circle: {
+    label: 'Circle', icon: '○',
+    get: () => ({ name: 'circle', animate: false, nodeDimensionsIncludeLabels: true, padding: 40 }),
+  },
+  grid: {
+    label: 'Grid', icon: '⊞',
+    get: () => ({ name: 'grid', animate: false, nodeDimensionsIncludeLabels: true, padding: 40, condense: true }),
+  },
+  cose: {
+    label: 'Force-Directed (Classic)', icon: '⟐',
+    get: (n) => ({
+      name: 'cose', animate: false, nodeDimensionsIncludeLabels: true,
+      nodeRepulsion: () => 8000, idealEdgeLength: () => n > 30 ? 80 : 120,
+      edgeElasticity: () => 100, gravity: 0.3, numIter: 500,
+      padding: 50, randomize: false, componentSpacing: 100,
+    }),
+  },
+};
+
+function getRadialFromEntity(entityId, cy) {
+  const depthMap = new Map();
+  let depth = 0, frontier = [entityId];
+  const visited = new Set([entityId]);
+  depthMap.set(entityId, 0);
+  while (frontier.length > 0) {
+    depth++;
+    const next = [];
+    frontier.forEach(nid => {
+      cy.getElementById(nid).neighborhood('node').forEach(nb => {
+        if (!visited.has(nb.id())) {
+          visited.add(nb.id()); depthMap.set(nb.id(), depth); next.push(nb.id());
+        }
+      });
+    });
+    frontier = next;
+  }
+  cy.nodes().forEach(n => { if (!depthMap.has(n.id())) depthMap.set(n.id(), depth + 1); });
+  const maxD = Math.max(...depthMap.values()) || 1;
+  return {
+    name: 'concentric', animate: false, nodeDimensionsIncludeLabels: true,
+    concentric: (node) => maxD - (depthMap.get(node.id()) || maxD),
+    levelWidth: () => 1, minNodeSpacing: 50, padding: 40,
+    startAngle: Math.PI * 1.5, clockwise: true,
+  };
+}
+
+function getHierarchyFromEntity(entityId, cy) {
+  const depthMap = new Map();
+  let maxDepth = 0, frontier = [entityId];
+  const visited = new Set([entityId]);
+  depthMap.set(entityId, 0);
+  while (frontier.length > 0) {
+    const next = [];
+    frontier.forEach(nid => {
+      const d = depthMap.get(nid);
+      cy.getElementById(nid).neighborhood('node').forEach(nb => {
+        if (!visited.has(nb.id())) {
+          visited.add(nb.id());
+          const nd = d + 1;
+          depthMap.set(nb.id(), nd);
+          if (nd > maxDepth) maxDepth = nd;
+          next.push(nb.id());
+        }
+      });
+    });
+    frontier = next;
+  }
+  cy.nodes().forEach(n => {
+    if (!depthMap.has(n.id())) depthMap.set(n.id(), maxDepth + 1);
+  });
+  const levels = new Map();
+  depthMap.forEach((d, id) => {
+    if (!levels.has(d)) levels.set(d, []);
+    levels.get(d).push(id);
+  });
+  const positions = {};
+  const levelGap = 160;
+  const nodeGap = 120;
+  levels.forEach((nodeIds, level) => {
+    const totalWidth = (nodeIds.length - 1) * nodeGap;
+    nodeIds.forEach((id, i) => {
+      positions[id] = {
+        x: -totalWidth / 2 + i * nodeGap,
+        y: level * levelGap
+      };
+    });
+  });
+  return {
+    name: 'preset',
+    positions: (node) => positions[node.id()] || { x: 0, y: (maxDepth + 2) * levelGap },
+    animate: false,
+    fit: true,
+    padding: 50
+  };
+}
+
+function getTimelineLayout(txns, cy) {
+  // Compute earliest date per entity
+  const entityDates = new Map();
+  txns.forEach(t => {
+    if (!t.date) return;
+    const ts = t.date.getTime();
+    [t.from, t.to].forEach(ent => {
+      if (!entityDates.has(ent) || ts < entityDates.get(ent)) {
+        entityDates.set(ent, ts);
+      }
+    });
+  });
+
+  // Entities without dates go to the end
+  const maxTs = Math.max(...entityDates.values()) || 0;
+  cy.nodes().forEach(n => {
+    if (!entityDates.has(n.id())) entityDates.set(n.id(), maxTs + 86400000);
+  });
+
+  const minTs = Math.min(...entityDates.values());
+  const range = maxTs - minTs || 86400000;
+
+  // Sort entities by date, then assign rows to avoid overlap
+  const sorted = Array.from(entityDates.entries()).sort((a, b) => a[1] - b[1]);
+
+  // Group entities that share the same date bucket (same day)
+  const dayBuckets = new Map();
+  sorted.forEach(([ent, ts]) => {
+    const dayKey = Math.floor((ts - minTs) / 86400000);
+    if (!dayBuckets.has(dayKey)) dayBuckets.set(dayKey, []);
+    dayBuckets.get(dayKey).push(ent);
+  });
+
+  const positions = {};
+  const xPadding = 100;
+  const yGap = 100;
+  const totalWidth = Math.max(cy.width() - 2 * xPadding, 800);
+
+  dayBuckets.forEach((entities, dayKey) => {
+    const t = range > 0 ? (dayKey * 86400000) / range : 0.5;
+    const x = xPadding + t * totalWidth;
+    const groupHeight = (entities.length - 1) * yGap;
+    entities.forEach((ent, i) => {
+      positions[ent] = {
+        x: x,
+        y: -groupHeight / 2 + i * yGap
+      };
+    });
+  });
+
+  return {
+    name: 'preset',
+    positions: (node) => positions[node.id()] || { x: totalWidth / 2, y: 0 },
+    animate: false,
+    fit: true,
+    padding: 60
+  };
+}
 /* ==========================================================================
    UTILITIES
    ========================================================================== */
@@ -431,6 +672,13 @@ function buildDOM() {
           <div class="cy-container" id="cy-detail-wrap"><div class="cy-canvas" id="cy-detail"></div><div class="cy-close" id="close-detail" title="Close">&times;</div></div>
           <div class="graph-divider" id="graph-divider" style="display:none"></div>
           <div class="cy-container" id="cy-summary-wrap"><div class="cy-canvas" id="cy-summary"></div><div class="cy-close" id="close-summary" title="Close">&times;</div></div>
+        </div>
+        <div id="graph-hints" style="position:absolute;bottom:0;left:0;right:0;z-index:60;padding:4px 12px;background:rgba(22,27,34,0.85);border-top:1px solid var(--border);font-size:10px;color:var(--text-muted);display:flex;gap:16px;pointer-events:none;">
+          <span> Left Click node to highlight</span>
+          <span> Shift+Left Click to mark for grouping</span>
+          <span> Drag box to multi-select → drag to move together</span>
+          <span> Right-click for options</span>
+          <span>Esc to clear</span>
         </div>
         <div id="detail-panel"><div class="detail-header"><strong id="detail-title">Details</strong><button class="icon-btn" id="detail-close">&times;</button></div><div class="detail-body" id="detail-body"></div></div>
       </div>
@@ -1169,6 +1417,13 @@ function buildTopbar() {
       <button data-view="sidebyside">Detail & Summary</button>
     </div>
     <div class="topbar-divider"></div>
+    <div class="layout-dropdown" id="layout-dropdown" style="position:relative;display:inline-block;">
+      <button id="layout-btn" style="display:flex;align-items:center;gap:6px;padding:4px 10px;">
+        <span id="layout-icon">◎</span> <span id="layout-label">Clustered</span> <span style="font-size:9px;color:var(--text-muted)">▾</span>
+      </button>
+      <div id="layout-panel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);z-index:600;min-width:240px;padding:4px 0;"></div>
+    </div>
+    <div class="topbar-divider"></div>
     <button id="btn-timeline" title="Toggle Timeline">Timeline</button>
     <div class="topbar-divider"></div>
     <label style="display:flex;align-items:center;gap:4px;cursor:pointer;text-transform:none;font-weight:normal"><input type="checkbox" id="chk-round" ${STATE.roundNumbers?'checked':''}> Round</label>
@@ -1192,7 +1447,42 @@ function buildTopbar() {
   $('#toggle-left-sidebar').addEventListener('click', () => {
     $('#left-sidebar').classList.toggle('collapsed');
   });
-  $('#btn-timeline').addEventListener('click', toggleTimeline);
+$('#btn-timeline').addEventListener('click', toggleTimeline);
+
+  // === ADD THIS BLOCK START ===
+  (function() {
+    const layoutBtn = $('#layout-btn'), layoutPanel = $('#layout-panel');
+    const allLayouts = [
+      ...Object.entries(LAYOUT_DEFS).map(([k,v]) => ({key:k, label:v.label, icon:v.icon})),
+      {key:'_div'},
+      {key:'radial', label:'Radial from Main Entity', icon:'✺'},
+      {key:'hierarchy_from', label:'Hierarchy from Main Entity', icon:'⤵'},
+    ];
+    allLayouts.forEach(lo => {
+      if (lo.key === '_div') { const d = document.createElement('div'); d.style.cssText = 'height:1px;background:var(--border);margin:4px 0;'; layoutPanel.appendChild(d); return; }
+      const opt = el('div', {style:'padding:7px 12px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;', innerHTML: `<span style="width:16px;text-align:center">${lo.icon}</span><span>${lo.label}</span>`});
+      if (lo.key === STATE.layoutName) opt.style.color = 'var(--accent)';
+      opt.addEventListener('mouseenter', () => opt.style.background = 'var(--accent-dim)');
+      opt.addEventListener('mouseleave', () => opt.style.background = '');
+      opt.addEventListener('click', () => {
+        if ((lo.key === 'radial' || lo.key === 'hierarchy_from') && !STATE.mainEntity) { alert('Select a Main Entity first.'); return; }
+        STATE.layoutName = lo.key;
+        STATE.layoutRootEntity = (lo.key === 'radial' || lo.key === 'hierarchy_from') ? STATE.mainEntity : null;
+        $('#layout-icon').textContent = lo.icon;
+        $('#layout-label').textContent = lo.label.split('(')[0].trim();
+        layoutPanel.style.display = 'none';
+        STATE._persistentPositions = {}; STATE._savedPositions = null;
+        STATE._skipPositionRestore = true;
+        renderGraphs();
+      });
+      layoutPanel.appendChild(opt);
+    });
+    layoutBtn.addEventListener('click', e => { e.stopPropagation(); layoutPanel.style.display = layoutPanel.style.display === 'none' ? 'block' : 'none'; });
+    layoutPanel.addEventListener('click', e => e.stopPropagation());
+    document.addEventListener('click', () => { layoutPanel.style.display = 'none'; });
+  })();
+  // === ADD THIS BLOCK END ===
+  
   $('#chk-round').addEventListener('change', e => {
     STATE.roundNumbers = e.target.checked;
     [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
@@ -1529,6 +1819,10 @@ function buildLeftSidebar() {
             <div class="sidebar-body" data-section="layout">                                                                                                        
               <div class="sidebar-row"><label>Legend</label>                                                                                                        
                 <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-legend" checked> Show</label>                         
+              </div>
+              <div class="sidebar-row"><label>Background</label><input type="color" id="s-bg-color" value="#0d1117" class="color-input"></div>
+              <div class="sidebar-row">
+                <button id="btn-add-annotation" style="width:100%">+ Add Text Box</button>
               </div>                                                                                                                                                
             </div>                                                                                                                                                  
           </div>                                                                                                                                                    
@@ -1580,7 +1874,13 @@ function buildLeftSidebar() {
                                    (newDirColors && (newInColor !== STATE.inColor || newOutColor !== STATE.outColor));                                              
           STATE.useDirectionColors = newDirColors;                                                                                                                  
           STATE.inColor = newInColor;                                                                                                                               
-          STATE.outColor = newOutColor;                                                                                                                             
+          STATE.outColor = newOutColor;                                                                                          
+          const newBg = $('#s-bg-color').value;
+          if (newBg !== STATE.bgColor) {
+            STATE.bgColor = newBg;
+            document.querySelectorAll('.cy-canvas').forEach(c => c.style.background = STATE.bgColor);
+          }
+
           updateGraphStyles();                                                                                                                                                        
         }, 200);                                                                                                                                                    
                                                                                                                                                                     
@@ -1611,7 +1911,8 @@ function buildLeftSidebar() {
           STATE.nodeSize = DEFAULTS.nodeSize;                                                                                                                       
           STATE.nodeColor = DEFAULTS.nodeColor;                                                                                                                     
           STATE.nodeIcons = {};                                                                                                                                     
-          STATE.nodeShapes = {};                                                                                                                                    
+          STATE.nodeShapes = {};
+          STATE.nodeColors = {};                                                                                                                                    
           STATE.fontSize = DEFAULTS.fontSize;                                                                                                                       
           STATE.fontFamily = DEFAULTS.fontFamily;                                                                                                                   
           STATE.fontColor = DEFAULTS.fontColor;                                                                                                                     
@@ -1634,7 +1935,13 @@ function buildLeftSidebar() {
           $('#s-font-italic').checked = false;                                                                                                                      
           renderGraphs();                                                                                                                                           
         });                                                                                                                                                         
-                                                                                                                                                                    
+                                                                                                                        $('#btn-add-annotation').addEventListener('click', () => {
+          const container = document.getElementById('graph-area');
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          addAnnotation(container, rect.width / 2 - 40, rect.height / 2 - 20);
+        });
+
         $('#reset-edge-style').addEventListener('click', e => {                                                                                                     
           e.stopPropagation();                                                                                                                                    
           STATE.edgeColor = DEFAULTS.edgeColor;                                                                                                                     
@@ -1855,11 +2162,10 @@ function getFilteredTransactions() {
       if (STATE.filters.amountMin != null && t.amount != null && Math.abs(t.amount) < STATE.filters.amountMin) return false;                                        
       if (STATE.filters.amountMax != null && t.amount != null && Math.abs(t.amount) > STATE.filters.amountMax) return false;                                        
       if (STATE.filters.type && t.type !== STATE.filters.type) return false;                                                                                        
-      if (STATE.mainEntity) {                                                                                                                                       
-        if (t.from !== STATE.mainEntity && t.to !== STATE.mainEntity) return false;                                                                                 
-        if (STATE.filters.direction === 'in' && t.to !== STATE.mainEntity) return false;                                                                            
-        if (STATE.filters.direction === 'out' && t.from !== STATE.mainEntity) return false;                                                                         
-      }                                                                                                                                                             
+      if (STATE.mainEntity && STATE.filters.direction) {
+  if (STATE.filters.direction === 'in' && t.to !== STATE.mainEntity) return false;
+  if (STATE.filters.direction === 'out' && t.from !== STATE.mainEntity) return false;
+}                                                                                                                                                             
       return true;                                                                                                                                                  
     });                                                                                                                                                             
   }
@@ -1878,15 +2184,17 @@ function buildGraphElements(txns, mode) {
           if (STATE.nodeSize === 'scaled') {                                                                                                                        
             sz = 45;                                                                                                                                                
           }                                                                                                                                                         
-          nodes.set(ent, {                                                                                                                                          
-            data: {                                                                                                                                                 
-              id: ent, label: ent, size: sz,                                                                                                                        
-              txnCount: eData.txnCount,                                                                                                                             
-              totalIn: eData.totalIn, totalOut: eData.totalOut,                                                                                                     
-              hasIcon: !!STATE.nodeIcons[ent],                                                                                                                      
-              iconUrl: STATE.nodeIcons[ent] || '',                                                                                                                  
-              shape: STATE.nodeShapes[ent] || STATE.nodeShape                                                                                                       
-            }                                                                                                                                                       
+          nodes.set(ent, {
+            data: {
+              id: ent, label: ent, size: sz,
+              txnCount: eData.txnCount,
+              totalIn: eData.totalIn, totalOut: eData.totalOut,
+              hasIcon: !!STATE.nodeIcons[ent],
+              iconUrl: STATE.nodeIcons[ent] || '',
+              shape: STATE.nodeShapes[ent] || STATE.nodeShape,
+              hasCustomColor: !!STATE.nodeColors[ent],
+              customColor: STATE.nodeColors[ent] || ''
+            }
           });                                                                                                                                                       
         }                                                                                                                                                           
       });                                                                                                                                                           
@@ -1987,8 +2295,8 @@ function getCyStyle() {
   'text-outline-color': '#0d1117',                                                                                                                                  
   'text-wrap': 'wrap',                                                                                                                                              
   'text-max-width': '300px',
-        'text-outline-color': '#0d1117',
-        'text-outline-width': 2,
+        'text-outline-color': 'transparent',
+        'text-outline-width': 0,
         'text-valign': valign,
         'text-halign': 'center',
         'text-margin-y': valign === 'bottom' ? 8 : valign === 'top' ? -8 : 0,
@@ -2011,6 +2319,13 @@ function getCyStyle() {
       }
     },
     {
+      selector: 'node[?hasCustomColor]',
+      style: {
+        'background-color': 'data(customColor)',
+        'border-color': 'data(customColor)',
+      }
+    },
+    {
       selector: 'edge',
       style: {
         'width': 'data(thickness)',
@@ -2025,8 +2340,8 @@ function getCyStyle() {
   'font-weight': STATE.edgeFontBold ? 'bold' : 'normal',                                                                                                            
   'font-style': STATE.edgeFontItalic ? 'italic' : 'normal',                                                                                                         
   'color': STATE.edgeFontColor,
-        'text-outline-color': '#0d1117',
-        'text-outline-width': 1.5,
+        'text-outline-color': 'transparent',
+        'text-outline-width': 0,
         'text-rotation': 'autorotate',
         'text-margin-y': -10,
       }
@@ -2115,47 +2430,50 @@ function getCyStyle() {
   ];
 }
 
-function getLayout(eleCount) {
-  if (eleCount <= 30) {
-    return {
-      name: 'cose',
-      animate: false,
-      nodeDimensionsIncludeLabels: true,
-      nodeRepulsion: function(){ return 8000; },
-      idealEdgeLength: function(){ return 120; },
-      edgeElasticity: function(){ return 100; },
-      gravity: 0.3,
-      numIter: 500,
-      padding: 50,
-      randomize: false,
-      componentSpacing: 100,
-    };
+function getLayout(eleCount, cy) {
+  if (STATE.layoutName === 'timeline' && cy) {
+    return getTimelineLayout(getFilteredTransactions(), cy);
   }
-  return {
-    name: 'cose',
-    animate: false,
-    nodeDimensionsIncludeLabels: true,
-    nodeRepulsion: function(){ return 5000; },
-    idealEdgeLength: function(){ return 80; },
-    gravity: 0.5,
-    numIter: 300,
-    padding: 30,
-    randomize: false,
-  };
+  if (STATE.layoutName === 'radial' && STATE.layoutRootEntity && cy) {
+    return getRadialFromEntity(STATE.layoutRootEntity, cy);
+  }
+  if (STATE.layoutName === 'hierarchy_from' && STATE.layoutRootEntity && cy) {
+    return getHierarchyFromEntity(STATE.layoutRootEntity, cy);
+  }
+  const def = LAYOUT_DEFS[STATE.layoutName];
+  if (def) return def.get(eleCount);
+  return LAYOUT_DEFS.fcose.get(eleCount);
 }
 
 function renderCy(container, elements, mode) {
-  const cy = cytoscape({
-    container: document.getElementById(container),
-    elements: [...elements.nodes, ...elements.edges],
-    style: getCyStyle(),
-    layout: getLayout(elements.nodes.length + elements.edges.length),
-    minZoom: 0.1,
-    maxZoom: 5,
-    wheelSensitivity: 0.3,
-    boxSelectionEnabled: false,
-    selectionType: 'additive',
-  });
+  let layoutCfg;
+  if (STATE.layoutName === 'radial' || STATE.layoutName === 'hierarchy_from' || STATE.layoutName === 'timeline') {
+    layoutCfg = { name: 'preset' };
+  } else {
+    layoutCfg = getLayout(elements.nodes.length + elements.edges.length, null);
+  }
+
+  let cy;
+  try {
+    cy = cytoscape({
+      container: document.getElementById(container),
+      elements: [...elements.nodes, ...elements.edges],
+      style: getCyStyle(),
+      layout: layoutCfg,
+      minZoom: 0.1, maxZoom: 5, wheelSensitivity: 0.3,
+      boxSelectionEnabled: true, selectionType: 'additive',
+    });
+  } catch (err) {
+    console.warn('Layout "' + layoutCfg.name + '" failed, falling back to cose:', err);
+    cy = cytoscape({
+      container: document.getElementById(container),
+      elements: [...elements.nodes, ...elements.edges],
+      style: getCyStyle(),
+      layout: LAYOUT_DEFS.cose.get(elements.nodes.length + elements.edges.length),
+      minZoom: 0.1, maxZoom: 5, wheelSensitivity: 0.3,
+      boxSelectionEnabled: true, selectionType: 'additive',
+    });
+  }
 
   // Tooltip
   const tooltip = $('#tooltip');
@@ -2235,14 +2553,29 @@ function renderCy(container, elements, mode) {
   });
 
   // Restore saved positions if available
+let positionsRestored = false;
 if (STATE._savedPositions && Object.keys(STATE._savedPositions).length > 0) {
   cy.nodes().forEach(n => {
     const pos = STATE._savedPositions[n.id()];
     if (pos) n.position(pos);
   });
   cy.fit();
+  positionsRestored = true;
   STATE._savedPositions = null;
 }
+
+// For entity-centric layouts, run layout only if we didn't restore positions
+if (!positionsRestored && (STATE.layoutName === 'radial' || STATE.layoutName === 'hierarchy_from' || STATE.layoutName === 'timeline')) {
+    try {
+      const layoutOpts = getLayout(cy.elements().length, cy);
+      cy.layout(layoutOpts).run();
+    } catch (err) {
+      console.warn('Entity-centric layout failed, falling back to cose:', err);
+      cy.layout(LAYOUT_DEFS.cose.get(cy.elements().length)).run();
+    }
+  }
+
+document.getElementById(container).style.background = STATE.bgColor;
 
 return cy;
 }
@@ -2253,16 +2586,22 @@ function renderGraphs() {
   const summaryWrap = $('#cy-summary-wrap');
   const divider = $('#graph-divider');
 
-  // Save positions from whichever instance(s) are currently alive
-  if (STATE.cyDetail) {
-    STATE.cyDetail.nodes().forEach(n => { STATE._persistentPositions[n.id()] = {...n.position()}; });
-    STATE.cyDetail.destroy(); STATE.cyDetail = null;
+  // Save positions — but skip when layout intentionally changed
+  if (STATE._skipPositionRestore) {
+    STATE._persistentPositions = {};
+    STATE._savedPositions = null;
+    STATE._skipPositionRestore = false;
+  } else {
+    if (STATE.cyDetail) {
+      STATE.cyDetail.nodes().forEach(n => { STATE._persistentPositions[n.id()] = {...n.position()}; });
+    }
+    if (STATE.cySummary) {
+      STATE.cySummary.nodes().forEach(n => { STATE._persistentPositions[n.id()] = {...n.position()}; });
+    }
+    STATE._savedPositions = STATE._persistentPositions;
   }
-  if (STATE.cySummary) {
-    STATE.cySummary.nodes().forEach(n => { STATE._persistentPositions[n.id()] = {...n.position()}; });
-    STATE.cySummary.destroy(); STATE.cySummary = null;
-  }
-  STATE._savedPositions = STATE._persistentPositions;
+  if (STATE.cyDetail) { STATE.cyDetail.destroy(); STATE.cyDetail = null; }
+  if (STATE.cySummary) { STATE.cySummary.destroy(); STATE.cySummary = null; }
 
   if (STATE.viewMode === 'detail') {
     detailWrap.style.display = '';
@@ -2297,6 +2636,7 @@ function renderGraphs() {
   if (STATE.showTimeline) renderTimeline(txns);
   runAnomalyDetection(txns);
   buildRightSidebar();
+  renderAllAnnotations();
 }
 
 function updateGraphStyles() {                                                                                                                                    
@@ -2457,8 +2797,28 @@ if (type === 'node') {
         target.neighborhood('node').removeClass('dimmed').addClass('highlighted');
       }}));                                                                                                                                                         
                                                                                                                                                                     
-      menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Set as Main Entity', onClick: () => {                                               
-        hideContextMenu();                                                                                                                                          
+      // Layout from this entity
+      menu.appendChild(el('div', {className: 'context-menu-divider'}));
+      menu.appendChild(el('div', {className: 'context-menu-item', innerHTML: '✺ Radial Layout from Here', onClick: () => {
+        hideContextMenu();
+        STATE.layoutName = 'radial'; STATE.layoutRootEntity = target.id();
+        STATE.mainEntity = target.id(); $('#f-main-entity').value = target.id(); $('#direction-filter').style.display = '';
+        STATE._persistentPositions = {}; STATE._savedPositions = null;
+        STATE._skipPositionRestore = true;
+        $('#layout-icon').textContent = '✺'; $('#layout-label').textContent = 'Radial';
+        renderGraphs();
+      }}));
+      menu.appendChild(el('div', {className: 'context-menu-item', innerHTML: '⤵ Hierarchy from Here', onClick: () => {
+        hideContextMenu();
+        STATE.layoutName = 'hierarchy_from'; STATE.layoutRootEntity = target.id();
+        STATE.mainEntity = target.id(); $('#f-main-entity').value = target.id(); $('#direction-filter').style.display = '';
+        STATE._persistentPositions = {}; STATE._savedPositions = null;
+        STATE._skipPositionRestore = true;
+        $('#layout-icon').textContent = '⤵'; $('#layout-label').textContent = 'Hierarchy';
+        renderGraphs();
+      }}));
+      menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Set as Main Entity', onClick: () => {
+        hideContextMenu();
         STATE.mainEntity = target.id();                                                                                                                             
         $('#f-main-entity').value = target.id();                                                                                                                    
         $('#direction-filter').style.display = '';                                                                                                                  
@@ -2493,7 +2853,35 @@ if (type === 'node') {
       });                                                                                                                                                           
                                                         
       menu.appendChild(el('div', {className: 'context-menu-divider'}));                                                                                             
-                                                        
+      // Per-entity color
+      const colorItem = el('div', {className: 'context-menu-item', style: 'display:flex;align-items:center;gap:8px;'});
+      colorItem.appendChild(el('span', {textContent: 'Node Color:'}));
+      const colorPick = el('input', {type: 'color', value: STATE.nodeColors[target.id()] || STATE.nodeColor, style: 'width:28px;height:20px;padding:0;border:1px solid var(--border);cursor:pointer;'});
+      colorPick.addEventListener('input', e => {
+        STATE.nodeColors[target.id()] = e.target.value;
+        target.data('hasCustomColor', true);
+        target.data('customColor', e.target.value);
+        [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
+          const n = cy.getElementById(target.id());
+          if (n.length) { n.data('hasCustomColor', true); n.data('customColor', e.target.value); }
+        });
+      });
+      colorPick.addEventListener('click', e => e.stopPropagation());
+      colorItem.appendChild(colorPick);
+      const colorReset = el('span', {textContent: '↺', style: 'cursor:pointer;font-size:14px;color:var(--text-muted);', title: 'Reset to default'});
+      colorReset.addEventListener('click', e => {
+        e.stopPropagation();
+        delete STATE.nodeColors[target.id()];
+        target.data('hasCustomColor', false);
+        target.data('customColor', '');
+        [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
+          const n = cy.getElementById(target.id());
+          if (n.length) { n.data('hasCustomColor', false); n.data('customColor', ''); }
+        });
+        updateGraphStyles();
+      });
+      colorItem.appendChild(colorReset);
+      menu.appendChild(colorItem);                                                  
       // Upload icon for this specific entity                                                                                                                       
       menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Upload Icon...', onClick: () => {
         hideContextMenu();                                                                                                                                          
@@ -2526,11 +2914,12 @@ if (type === 'node') {
       }                                                                                                                                                             
                                                                                                                                                                     
       // Reset this entity to defaults (only if it has overrides)                                                                                                   
-      if (STATE.nodeShapes[target.id()] || STATE.nodeIcons[target.id()]) {
+      if (STATE.nodeShapes[target.id()] || STATE.nodeIcons[target.id()] || STATE.nodeColors[target.id()]) {
         menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Reset Entity to Default', onClick: () => {                                        
           hideContextMenu();                                                                                                                                        
           delete STATE.nodeShapes[target.id()];                                                                                                                     
-          delete STATE.nodeIcons[target.id()];                                                                                                                      
+          delete STATE.nodeIcons[target.id()];
+          delete STATE.nodeColors[target.id()];                                                                                                                     
           renderGraphs();                                                                                                                                           
         }}));                                                                                                                                                       
       }                                                                                                                                                             
@@ -2598,9 +2987,32 @@ function toggleTimeline() {
   const panel = $('#timeline-panel');
   if (STATE.showTimeline) {
     panel.classList.add('active');
-    renderTimeline(getFilteredTransactions());
+    // Save current layout and switch to timeline layout
+    STATE._preTimelineLayout = STATE.layoutName;
+    STATE.layoutName = 'timeline';
+    STATE._persistentPositions = {};
+    STATE._savedPositions = null;
+    STATE._skipPositionRestore = true;
+    $('#layout-icon').textContent = '⟿';
+    $('#layout-label').textContent = 'Timeline';
+    renderGraphs();
   } else {
     panel.classList.remove('active');
+    // Restore previous layout
+    if (STATE._preTimelineLayout) {
+      STATE.layoutName = STATE._preTimelineLayout;
+      STATE._preTimelineLayout = null;
+      // Update the layout dropdown label
+      const def = LAYOUT_DEFS[STATE.layoutName];
+      if (def) {
+        $('#layout-icon').textContent = def.icon;
+        $('#layout-label').textContent = def.label.split('(')[0].trim();
+      }
+    }
+    STATE._persistentPositions = {};
+    STATE._savedPositions = null;
+    STATE._skipPositionRestore = true;
+    renderGraphs();
   }
 }
 
@@ -3098,6 +3510,14 @@ function showSummary() {
   STATE.summaryText = generateSummary();
   $('#summary-text').textContent = STATE.summaryText;
   $('#summary-modal').classList.add('active');
+  // Bind close handlers directly (resilient to bindGlobalEvents failures)
+  $('#summary-close').onclick = () => $('#summary-modal').classList.remove('active');
+  $('#summary-copy').onclick = () => {
+    navigator.clipboard.writeText(STATE.summaryText).then(() => alert('Copied to clipboard.'));
+  };
+  $('#summary-modal').onclick = e => {
+    if (e.target === $('#summary-modal')) $('#summary-modal').classList.remove('active');
+  };
 }
 
 
@@ -3136,26 +3556,38 @@ async function exportPDF() {
       pdf.setGState(new pdf.GState({opacity: 1}));
     }
 
-    // Capture graph
-    const graphArea = document.getElementById('graph-area');
-    if (graphArea) {
-      const canvas = await html2canvas(graphArea, {
-        backgroundColor: '#0d1117',
-        scale: 2,
-        useCORS: true,
-        logging: false,
+    // Capture graph from Cytoscape directly
+    const cy = getActiveCy();
+    if (cy) {
+      const imgData = cy.png({full: true, scale: 2, bg: STATE.bgColor});
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = imgData;
       });
-      const imgData = canvas.toDataURL('image/png');
-      const imgW = pageW - 20;
-      const imgH = (canvas.height / canvas.width) * imgW;
-      const maxH = pageH - 40;
-      const finalH = Math.min(imgH, maxH);
-      pdf.addImage(imgData, 'PNG', 10, 28, imgW, finalH);
+      const availW = pageW - 20;
+      const availH = pageH - 40;
+      const imgAspect = img.naturalWidth / img.naturalHeight;
+      const availAspect = availW / availH;
+      let finalW, finalH;
+      if (imgAspect > availAspect) {
+        // Image is wider than available area — fit to width
+        finalW = availW;
+        finalH = availW / imgAspect;
+      } else {
+        // Image is taller than available area — fit to height
+        finalH = availH;
+        finalW = availH * imgAspect;
+      }
+      const offsetX = 10 + (availW - finalW) / 2;
+      const offsetY = 28 + (availH - finalH) / 2;
+      pdf.addImage(imgData, 'PNG', offsetX, offsetY, finalW, finalH);
     }
 
     // Timeline capture
-    const timelinePanel = document.getElementById('timeline-panel');
-    if (timelinePanel && STATE.showTimeline) {
+    const tlCanvas = document.querySelector('#timeline-container canvas');
+    if (tlCanvas && STATE.showTimeline) {
       pdf.addPage();
       if (watermark) {
         pdf.setFontSize(40);
@@ -3167,12 +3599,6 @@ async function exportPDF() {
       pdf.setFontSize(14);
       pdf.setTextColor(88, 166, 255);
       pdf.text('Timeline View', 10, 15);
-      const tlCanvas = await html2canvas(timelinePanel, {
-        backgroundColor: '#161b22',
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      });
       const tlImg = tlCanvas.toDataURL('image/png');
       const tlW = pageW - 20;
       const tlH = (tlCanvas.height / tlCanvas.width) * tlW;
@@ -3219,7 +3645,7 @@ async function exportPDF() {
 async function saveAsPNG() {
   const cy = getActiveCy();
   if (!cy) return;
-  const png = cy.png({full: true, scale: 2, bg: '#0d1117'});
+  const png = cy.png({full: true, scale: 2, bg: STATE.bgColor});
   const a = document.createElement('a');
   a.href = png;
   a.download = `transaction_graph_${new Date().toISOString().slice(0,10)}.png`;
@@ -3515,6 +3941,330 @@ function buildGroupsSidebarSection() {
   const firstSection = sb.querySelector('.sidebar-section');
   if (firstSection) sb.insertBefore(section, firstSection); else sb.appendChild(section);
   $('#btn-new-group')?.addEventListener('click', e => { e.stopPropagation(); openGroupModal([]); });
+}
+
+/* ==========================================================================
+   ANNOTATIONS
+   ========================================================================== */
+let _annotationCounter = 0;
+
+function addAnnotation(graphContainer, x, y) {
+  _annotationCounter++;
+  const id = `annot_${_annotationCounter}`;
+  const ann = {
+    id, x: x || 100, y: y || 100,
+    html: '', fontSize: 12, color: '#e6edf3',
+    bgColor: 'rgba(255,255,255,0.08)', borderColor: '#484f58',
+    align: 'left', fontFamily: 'sans-serif',
+    bold: false, italic: false,
+    width: null, height: null, imageUrl: null
+  };
+  STATE.annotations.push(ann);
+  renderAnnotation(ann, graphContainer);
+  return ann;
+}
+
+function renderAnnotation(ann, containerEl) {
+  const container = typeof containerEl === 'string' ? document.getElementById(containerEl) : containerEl;
+  if (!container) return;
+  container.style.position = 'relative';
+
+  const box = el('div', {className: 'annotation-box', id: ann.id});
+  box.style.left = ann.x + 'px';
+  box.style.top = ann.y + 'px';
+  box.style.fontSize = (ann.fontSize || 12) + 'px';
+  box.style.color = ann.color || '#e6edf3';
+  box.style.background = ann.bgColor || 'rgba(255,255,255,0.08)';
+  box.style.textAlign = ann.align || 'left';
+  box.style.fontFamily = ann.fontFamily || 'sans-serif';
+  if (ann.width) box.style.width = ann.width + 'px';
+  if (ann.height) box.style.height = ann.height + 'px';
+  box.style.borderStyle = ann.showBorder !== false ? (ann.borderStyle || 'solid') : 'none';
+  box.style.borderWidth = ann.showBorder !== false ? (ann.borderWidth || 1) + 'px' : '0';
+  box.style.borderColor = ann.showBorder !== false ? (ann.borderColor || '#484f58') : 'transparent';
+
+  // Text content — must exist before toolbar so execCommand can target it
+  const textEl = el('div', {className: 'annotation-text', contentEditable: 'true'});
+  textEl.innerHTML = ann.html || '';
+  textEl.style.color = ann.color || '#e6edf3';
+  textEl.addEventListener('input', () => { ann.html = textEl.innerHTML; });
+  textEl.addEventListener('mousedown', e => e.stopPropagation());
+  textEl.addEventListener('keydown', e => e.stopPropagation());
+
+  // Helper: run execCommand while keeping focus in textEl
+  function exec(cmd, val) {
+    textEl.focus();
+    document.execCommand(cmd, false, val || null);
+    ann.html = textEl.innerHTML;
+  }
+
+  // Helper: check if current selection has a command active
+  function isActive(cmd) {
+    return document.queryCommandState(cmd);
+  }
+
+  // Controls toolbar
+  const controls = el('div', {className: 'annotation-controls'});
+
+  // Font family
+  const fontSel = el('select', {style: 'height:22px;font-size:9px;padding:0 2px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:3px;cursor:pointer;max-width:70px;', title: 'Font family'});
+  ['sans-serif','serif','monospace','Arial','Georgia','Courier New','Times New Roman','Verdana'].forEach(f => {
+    fontSel.appendChild(el('option', {value: f, textContent: f}));
+  });
+  fontSel.value = ann.fontFamily || 'sans-serif';
+  fontSel.addEventListener('change', e => { e.stopPropagation(); exec('fontName', e.target.value); });
+  fontSel.addEventListener('mousedown', e => e.stopPropagation());
+  controls.appendChild(fontSel);
+
+  // Font size
+  const sizeSel = el('select', {style: 'height:22px;font-size:9px;padding:0 2px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:3px;cursor:pointer;max-width:36px;', title: 'Font size'});
+  [1,2,3,4,5,6,7].forEach(s => {
+    const labels = {1:'8',2:'10',3:'12',4:'14',5:'18',6:'24',7:'36'};
+    sizeSel.appendChild(el('option', {value: String(s), textContent: labels[s]}));
+  });
+  sizeSel.value = '3';
+  sizeSel.addEventListener('change', e => { e.stopPropagation(); exec('fontSize', e.target.value); });
+  sizeSel.addEventListener('mousedown', e => e.stopPropagation());
+  controls.appendChild(sizeSel);
+
+  controls.appendChild(el('div', {className: 'ctrl-divider'}));
+
+  // Bold
+  const boldBtn = el('button', {title: 'Bold (selection)', innerHTML: '<b>B</b>'});
+  boldBtn.addEventListener('click', e => { e.stopPropagation(); exec('bold'); boldBtn.classList.toggle('active', isActive('bold')); });
+  controls.appendChild(boldBtn);
+
+  // Italic
+  const italicBtn = el('button', {title: 'Italic (selection)', innerHTML: '<i>I</i>'});
+  italicBtn.addEventListener('click', e => { e.stopPropagation(); exec('italic'); italicBtn.classList.toggle('active', isActive('italic')); });
+  controls.appendChild(italicBtn);
+
+  // Underline
+  const underBtn = el('button', {title: 'Underline (selection)', innerHTML: '<u>U</u>'});
+  underBtn.addEventListener('click', e => { e.stopPropagation(); exec('underline'); underBtn.classList.toggle('active', isActive('underline')); });
+  controls.appendChild(underBtn);
+
+  // Strikethrough
+  const strikeBtn = el('button', {title: 'Strikethrough (selection)', innerHTML: '<s>S</s>'});
+  strikeBtn.addEventListener('click', e => { e.stopPropagation(); exec('strikethrough'); strikeBtn.classList.toggle('active', isActive('strikethrough')); });
+  controls.appendChild(strikeBtn);
+
+  controls.appendChild(el('div', {className: 'ctrl-divider'}));
+
+  // Text color (selection)
+  const colorBtn = el('button', {title: 'Text color (selection)', textContent: 'A'});
+  colorBtn.style.textDecoration = 'underline';
+  colorBtn.style.color = ann.color || '#e6edf3';
+  const colorInp = el('input', {type: 'color', value: ann.color || '#e6edf3', style: 'position:absolute;opacity:0;width:0;height:0;pointer-events:none;'});
+  colorBtn.addEventListener('click', e => { e.stopPropagation(); colorInp.click(); });
+  colorInp.addEventListener('input', e => {
+    exec('foreColor', e.target.value);
+    colorBtn.style.color = e.target.value;
+  });
+  colorInp.addEventListener('mousedown', e => e.stopPropagation());
+  colorBtn.appendChild(colorInp);
+  controls.appendChild(colorBtn);
+
+  // Highlight (selection background)
+  const hlBtn = el('button', {title: 'Highlight (selection)', textContent: '🖍'});
+  const hlInp = el('input', {type: 'color', value: '#ffff00', style: 'position:absolute;opacity:0;width:0;height:0;pointer-events:none;'});
+  hlBtn.addEventListener('click', e => { e.stopPropagation(); hlInp.click(); });
+  hlInp.addEventListener('input', e => { exec('hiliteColor', e.target.value); });
+  hlInp.addEventListener('mousedown', e => e.stopPropagation());
+  hlBtn.appendChild(hlInp);
+  controls.appendChild(hlBtn);
+
+  controls.appendChild(el('div', {className: 'ctrl-divider'}));
+
+  // Align left
+  const alignLBtn = el('button', {title: 'Align left', innerHTML: '⫷'});
+  const alignCBtn = el('button', {title: 'Align center', innerHTML: '☰'});
+  const alignRBtn = el('button', {title: 'Align right', innerHTML: '⫸'});
+  function setAlign(val) {
+    exec(val === 'left' ? 'justifyLeft' : val === 'center' ? 'justifyCenter' : 'justifyRight');
+    [alignLBtn, alignCBtn, alignRBtn].forEach(b => b.classList.remove('active'));
+    if (val === 'left') alignLBtn.classList.add('active');
+    else if (val === 'center') alignCBtn.classList.add('active');
+    else alignRBtn.classList.add('active');
+    ann.align = val;
+  }
+  alignLBtn.addEventListener('click', e => { e.stopPropagation(); setAlign('left'); });
+  alignCBtn.addEventListener('click', e => { e.stopPropagation(); setAlign('center'); });
+  alignRBtn.addEventListener('click', e => { e.stopPropagation(); setAlign('right'); });
+  if ((ann.align || 'left') === 'left') alignLBtn.classList.add('active');
+  else if (ann.align === 'center') alignCBtn.classList.add('active');
+  else if (ann.align === 'right') alignRBtn.classList.add('active');
+  controls.appendChild(alignLBtn);
+  controls.appendChild(alignCBtn);
+  controls.appendChild(alignRBtn);
+
+  controls.appendChild(el('div', {className: 'ctrl-divider'}));
+
+  // Box background
+  const bgBtn = el('button', {title: 'Box background', textContent: '◼'});
+  const bgInp = el('input', {type: 'color', value: '#222222', style: 'position:absolute;opacity:0;width:0;height:0;pointer-events:none;'});
+  bgBtn.addEventListener('click', e => { e.stopPropagation(); bgInp.click(); });
+  bgInp.addEventListener('input', e => { ann.bgColor = e.target.value + '40'; box.style.background = ann.bgColor; });
+  bgInp.addEventListener('mousedown', e => e.stopPropagation());
+  bgBtn.appendChild(bgInp);
+  controls.appendChild(bgBtn);
+
+  controls.appendChild(el('div', {className: 'ctrl-divider'}));
+
+  // Border toggle
+  const borderBtn = el('button', {title: 'Toggle border', textContent: '▢', className: ann.showBorder !== false ? 'active' : ''});
+  borderBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    ann.showBorder = !ann.showBorder;
+    borderBtn.classList.toggle('active');
+    box.style.borderStyle = ann.showBorder ? (ann.borderStyle || 'solid') : 'none';
+    box.style.borderWidth = ann.showBorder ? (ann.borderWidth || 1) + 'px' : '0';
+    box.style.borderColor = ann.showBorder ? (ann.borderColor || '#484f58') : 'transparent';
+    borderStyleSel.disabled = !ann.showBorder;
+    borderWidthSel.disabled = !ann.showBorder;
+    borderColorBtn.disabled = !ann.showBorder;
+  });
+  controls.appendChild(borderBtn);
+
+  const borderStyleSel = el('select', {style: 'height:22px;font-size:9px;padding:0 2px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:3px;cursor:pointer;max-width:55px;', title: 'Border style'});
+  ['solid','dashed','dotted','double'].forEach(s => {
+    borderStyleSel.appendChild(el('option', {value: s, textContent: s, ...(s === (ann.borderStyle || 'solid') ? {selected:'selected'} : {})}));
+  });
+  borderStyleSel.disabled = ann.showBorder === false;
+  borderStyleSel.addEventListener('change', e => { e.stopPropagation(); ann.borderStyle = e.target.value; box.style.borderStyle = ann.borderStyle; });
+  borderStyleSel.addEventListener('mousedown', e => e.stopPropagation());
+  controls.appendChild(borderStyleSel);
+
+  const borderWidthSel = el('select', {style: 'height:22px;font-size:9px;padding:0 2px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:3px;cursor:pointer;max-width:38px;', title: 'Border width'});
+  [1,2,3,4].forEach(w => {
+    borderWidthSel.appendChild(el('option', {value: String(w), textContent: w + 'px', ...(w === (ann.borderWidth || 1) ? {selected:'selected'} : {})}));
+  });
+  borderWidthSel.disabled = ann.showBorder === false;
+  borderWidthSel.addEventListener('change', e => { e.stopPropagation(); ann.borderWidth = parseInt(e.target.value); box.style.borderWidth = ann.borderWidth + 'px'; });
+  borderWidthSel.addEventListener('mousedown', e => e.stopPropagation());
+  controls.appendChild(borderWidthSel);
+
+  const borderColorBtn = el('button', {title: 'Border color', textContent: '⬜'});
+  borderColorBtn.style.color = ann.borderColor || '#484f58';
+  borderColorBtn.disabled = ann.showBorder === false;
+  const borderColorInp = el('input', {type: 'color', value: ann.borderColor || '#484f58', style: 'position:absolute;opacity:0;width:0;height:0;pointer-events:none;'});
+  borderColorBtn.addEventListener('click', e => { e.stopPropagation(); borderColorInp.click(); });
+  borderColorInp.addEventListener('input', e => { ann.borderColor = e.target.value; box.style.borderColor = ann.borderColor; borderColorBtn.style.color = ann.borderColor; });
+  borderColorInp.addEventListener('mousedown', e => e.stopPropagation());
+  borderColorBtn.appendChild(borderColorInp);
+  controls.appendChild(borderColorBtn);
+
+  controls.appendChild(el('div', {className: 'ctrl-divider'}));
+
+  // Image upload
+  const imgBtn = el('button', {title: 'Add image/logo', textContent: '🖼'});
+  const imgInp = el('input', {type: 'file', accept: 'image/*', style: 'position:absolute;opacity:0;width:0;height:0;pointer-events:none;'});
+  imgBtn.addEventListener('click', e => { e.stopPropagation(); imgInp.click(); });
+  imgInp.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      ann.imageUrl = ev.target.result;
+      const existing = box.querySelector('.annotation-img');
+      if (existing) existing.remove();
+      const imgEl = el('img', {className: 'annotation-img', src: ann.imageUrl});
+      imgEl.addEventListener('mousedown', ev2 => ev2.stopPropagation());
+      box.appendChild(imgEl);
+    };
+    reader.readAsDataURL(file);
+  });
+  imgInp.addEventListener('mousedown', e => e.stopPropagation());
+  imgBtn.appendChild(imgInp);
+  controls.appendChild(imgBtn);
+
+  // Remove image (if exists)
+  if (ann.imageUrl) {
+    const rmImgBtn = el('button', {title: 'Remove image', textContent: '🗑'});
+    rmImgBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      ann.imageUrl = null;
+      const existing = box.querySelector('.annotation-img');
+      if (existing) existing.remove();
+      rmImgBtn.remove();
+    });
+    controls.appendChild(rmImgBtn);
+  }
+
+  controls.appendChild(el('div', {className: 'ctrl-divider'}));
+
+  // Delete
+  const deleteBtn = el('button', {title: 'Delete text box', textContent: '×'});
+  deleteBtn.style.color = '#f85149';
+  deleteBtn.addEventListener('click', e => { e.stopPropagation(); STATE.annotations = STATE.annotations.filter(a => a.id !== ann.id); box.remove(); });
+  controls.appendChild(deleteBtn);
+
+  // Update active states on selection change
+  textEl.addEventListener('mouseup', () => {
+    boldBtn.classList.toggle('active', isActive('bold'));
+    italicBtn.classList.toggle('active', isActive('italic'));
+    underBtn.classList.toggle('active', isActive('underline'));
+    strikeBtn.classList.toggle('active', isActive('strikethrough'));
+  });
+  textEl.addEventListener('keyup', () => {
+    boldBtn.classList.toggle('active', isActive('bold'));
+    italicBtn.classList.toggle('active', isActive('italic'));
+    underBtn.classList.toggle('active', isActive('underline'));
+    strikeBtn.classList.toggle('active', isActive('strikethrough'));
+  });
+
+  box.appendChild(controls);
+  box.appendChild(textEl);
+
+  // Restore image if saved
+  if (ann.imageUrl) {
+    const imgEl = el('img', {className: 'annotation-img', src: ann.imageUrl});
+    imgEl.addEventListener('mousedown', e => e.stopPropagation());
+    box.appendChild(imgEl);
+  }
+
+  // Save size on resize
+  const resizeObs = new ResizeObserver(() => {
+    ann.width = box.offsetWidth;
+    ann.height = box.offsetHeight;
+  });
+  resizeObs.observe(box);
+
+  // Dragging — skip if near resize handle (bottom-right 18x18 corner)
+  let dragging = false, dragOffX = 0, dragOffY = 0;
+  box.addEventListener('mousedown', e => {
+    if (e.target.closest('.annotation-controls') || e.target.closest('.annotation-text') || e.target.closest('.annotation-img')) return;
+    const rect = box.getBoundingClientRect();
+    const fromRight = rect.right - e.clientX;
+    const fromBottom = rect.bottom - e.clientY;
+    if (fromRight < 18 && fromBottom < 18) return;
+    dragging = true;
+    dragOffX = e.clientX - box.offsetLeft;
+    dragOffY = e.clientY - box.offsetTop;
+    box.style.zIndex = 150;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    box.style.left = (e.clientX - dragOffX) + 'px';
+    box.style.top = (e.clientY - dragOffY) + 'px';
+    ann.x = e.clientX - dragOffX;
+    ann.y = e.clientY - dragOffY;
+  });
+  document.addEventListener('mouseup', () => {
+    if (dragging) { dragging = false; box.style.zIndex = 100; }
+  });
+
+  container.appendChild(box);
+  setTimeout(() => textEl.focus(), 50);
+}
+
+function renderAllAnnotations() {
+  // Clear existing
+  document.querySelectorAll('.annotation-box').forEach(b => b.remove());
+  const container = document.getElementById('graph-area');
+  if (!container) return;
+  STATE.annotations.forEach(ann => renderAnnotation(ann, container));
 }
 
 /* ==========================================================================
