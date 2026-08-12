@@ -236,7 +236,7 @@ To make changes, edit `index.html` directly. The JavaScript is wrapped in an IIF
 
 ## Owner & Support
 
-- **Maintainer:** Channing Xu (`cxu@alixpartners.com`)
+- **Maintainer:** Chenxi Xu (`cxu@alixpartners.com`)
 - **GitHub:** [chenxi-ap/TRACE---DEV](https://github.com/chenxi-ap/TRACE---DEV)
 - **Workspace:** [GIT_REPO_TRACE/TRACE_APP](https://adb-7619020834316660.0.azuredatabricks.net/browse/folders/) — `/Workspace/Users/cxu@alixpartners.com/GIT_REPO_TRACE/TRACE_APP`
 
