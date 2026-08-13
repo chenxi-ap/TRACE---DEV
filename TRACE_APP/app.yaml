@@ -1,0 +1,8 @@
+command: ["python", "app.py"]
+
+env:
+  - name: DATABRICKS_HTTP_PATH
+    value: "/sql/1.0/warehouses/8fe165e8fbe54d3e"
+
+# DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
+# are injected automatically by the Apps runtime — do not set them here.
