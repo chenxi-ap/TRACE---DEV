@@ -307,39 +307,51 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 .annotation-img { max-width: 100%; border-radius: 3px; margin-top: 4px; display: block; cursor: default; }
 
 /* ===== SWIMLANE TIMELINE ===== */
-#timeline-container { display: flex; flex-direction: column; height: 100%; }
+#timeline-container { display:flex; flex-direction:column; flex:1; min-height:0; }
 
-#timeline-panel { position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);z-index:40;flex-shrink:0;overflow:hidden;display:none;flex-direction:column; }
+#timeline-panel { position:relative; flex:0 0 360px; min-height:140px; background:var(--bg-primary); border-bottom:1px solid var(--border); overflow:hidden; display:none; flex-direction:column; }
 #timeline-panel.active { display:flex; }
-#timeline-panel .panel-close { position:absolute;top:8px;right:12px;z-index:50; }
- 
-.tl-controls { display:flex;align-items:center;gap:8px;padding:0 12px;height:36px;border-bottom:1px solid var(--border);background:var(--bg-secondary);flex-shrink:0; }
-.tl-controls select, .tl-controls button { font-size:10px; }
-.tl-controls .tl-step { font-size:10px;color:var(--text-secondary);margin-left:auto; }
-.tl-body { flex:1;display:flex;overflow:hidden;position:relative; }
-.tl-labels { flex-shrink:0;overflow:hidden;border-right:1px solid var(--border);background:var(--bg-secondary);z-index:20; }
-.tl-label-row { display:flex;align-items:center;gap:6px;padding:0 10px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:grab;border-bottom:1px solid var(--border);transition:background 0.15s; }
+#timeline-panel .panel-close { position:absolute; top:6px; right:10px; z-index:60; }
+.tl-resizer { height:6px; flex-shrink:0; cursor:row-resize; background:var(--bg-secondary); border-top:1px solid var(--border); }
+.tl-resizer:hover { background:var(--accent-dim); }
+
+.tl-controls { display:flex; align-items:center; gap:8px; padding:0 34px 0 12px; height:40px; border-bottom:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0; overflow-x:auto; }
+.tl-controls select, .tl-controls button { font-size:10px; flex-shrink:0; }
+.tl-controls .tl-step { font-size:10px; color:var(--text-secondary); margin-left:auto; white-space:nowrap; }
+.tl-zoom { display:flex; align-items:center; gap:2px; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+.tl-zoom button { border:none; border-radius:0; padding:3px 8px; }
+.tl-zoom span { font-size:10px; color:var(--text-muted); padding:0 6px; min-width:42px; text-align:center; }
+
+.tl-axis-pop { position:absolute; top:38px; left:12px; z-index:80; background:var(--bg-secondary); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:10px; width:230px; display:none; }
+.tl-axis-pop.open { display:block; }
+.tl-axis-row { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+.tl-axis-row label { min-width:64px; }
+.tl-axis-row select, .tl-axis-row input { flex:1; min-width:0; }
+
+.tl-body { flex:1; display:flex; overflow:auto; position:relative; }
+.tl-labels { flex-shrink:0; position:sticky; left:0; z-index:20; border-right:1px solid var(--border); background:var(--bg-secondary); }
+.tl-label-row { display:flex; align-items:center; gap:6px; padding:0 10px; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:grab; border-bottom:1px solid var(--border); transition:background 0.15s; }
 .tl-label-row:hover { background:rgba(88,166,255,0.06); }
 .tl-label-row.dragging { opacity:0.4; }
 .tl-label-row.drag-over { border-top:2px solid var(--accent); }
-.tl-canvas-wrap { flex:1;display:flex;flex-direction:column;overflow-x:auto;position:relative; }
-.tl-header { height:28px;border-bottom:1px solid var(--border);background:var(--bg-secondary);position:relative;flex-shrink:0; }
-.tl-tick { position:absolute;top:0;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:2px;transform:translateX(-50%); }
-.tl-tick-label { font-size:9px;color:var(--text-muted);white-space:nowrap; }
-.tl-grid { flex:1;position:relative;overflow:hidden; }
-.tl-grid-line { position:absolute;top:0;bottom:0;width:1px;background:var(--border);opacity:0.12;pointer-events:none; }
-.tl-row-bg { position:absolute;left:0;right:0;border-bottom:1px solid var(--border);pointer-events:none; }
-.tl-dot { position:absolute;border-radius:50%;cursor:pointer;z-index:15;transition:transform 0.15s,box-shadow 0.15s;border-width:1.5px;border-style:solid;opacity:0.9; }
-.tl-dot:hover { transform:translate(-50%,-50%) scale(2.2) !important;z-index:25;opacity:1; }
-.tl-dot.played  { box-shadow:0 0 6px 2px rgba(88,166,255,0.4); }
-.tl-dot.playing { box-shadow:0 0 12px 4px rgba(88,166,255,0.8);transform:translate(-50%,-50%) scale(2.2) !important; }
-@keyframes tlFlow { to { stroke-dashoffset: -24; } }
-.tl-flow-line { animation: tlFlow 1.2s linear infinite; }
+.tl-canvas-wrap { display:flex; flex-direction:column; flex-shrink:0; position:relative; }
+.tl-header { height:30px; border-bottom:1px solid var(--border); background:var(--bg-secondary); position:sticky; top:0; z-index:25; flex-shrink:0; }
+.tl-tick { position:absolute; top:0; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding-bottom:3px; transform:translateX(-50%); }
+.tl-tick-label { white-space:nowrap; }
+.tl-grid { position:relative; flex-shrink:0; }
+.tl-grid-line { position:absolute; top:0; bottom:0; width:1px; background:var(--border); opacity:0.12; pointer-events:none; }
+.tl-row-bg { position:absolute; left:0; right:0; border-bottom:1px solid var(--border); pointer-events:none; }
+.tl-dot { position:absolute; border-radius:50%; cursor:pointer; z-index:15; transition:transform 0.15s, box-shadow 0.15s; border-width:1.5px; border-style:solid; opacity:0.9; }
+.tl-dot:hover { transform:translate(-50%,-50%) scale(2.2) !important; z-index:25; opacity:1; }
+.tl-dot.played { box-shadow:0 0 6px 2px rgba(88,166,255,0.4); }
+.tl-dot.playing { box-shadow:0 0 12px 4px rgba(88,166,255,0.8); transform:translate(-50%,-50%) scale(2.2) !important; }
+@keyframes tlFlow { to { stroke-dashoffset:-24; } }
+.tl-flow-line { animation:tlFlow 1.2s linear infinite; }
 .tl-flow-line.paused { animation-play-state:paused; }
-.tl-flow-line.active { stroke-opacity:0.9 !important;filter:drop-shadow(0 0 3px rgba(88,166,255,0.5)); }
+.tl-flow-line.active { stroke-opacity:0.9 !important; filter:drop-shadow(0 0 3px rgba(88,166,255,0.5)); }
 .tl-flow-line.played { stroke-opacity:0.5 !important; }
-.tl-gap-overlay { position:absolute;top:0;bottom:0;background:rgba(248,81,73,0.04);pointer-events:none;z-index:2; }
-.tl-gap-label { position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:8px;color:#f85149;white-space:nowrap;pointer-events:none;z-index:3;background:rgba(13,17,23,0.85);padding:1px 5px;border-radius:2px; }
+.tl-gap-overlay { position:absolute; top:0; bottom:0; background:rgba(248,81,73,0.04); pointer-events:none; z-index:2; }
+.tl-gap-label { position:absolute; top:4px; left:50%; transform:translateX(-50%); font-size:8px; color:#f85149; white-space:nowrap; pointer-events:none; z-index:3; background:rgba(13,17,23,0.85); padding:1px 5px; border-radius:2px; }
 
 /* Responsive */
 @media (max-width: 1200px) {
@@ -389,6 +401,12 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   roundNumbers: true,
   showTimeline: false,
   timelineTimezone: 'America/New_York',
+  timelineZoom: 1,
+  timelineHeight: 360,
+  timelineAxisMode: 'auto',
+  timelineAxisFont: { family: 'sans-serif', size: 9, color: '#8b949e', bold: false, italic: false },
+  _tlPlayInterval: null,
+  _tlRefresh: null,
   edgeColor: '#58a6ff',
   nodeColor: '#58a6ff',
   inColor: '#3fb950',
@@ -701,7 +719,7 @@ function buildDOM() {
     <div id="main-content">
       <div id="left-sidebar"></div>
       <div id="canvas-area">
-        <div id="timeline-panel"><div id="timeline-container"></div><button class="icon-btn panel-close" id="timeline-close" title="Hide Timeline">&times;</button></div>
+        <div id="timeline-panel"><div id="timeline-container"></div><button class="icon-btn panel-close" id="timeline-close" title="Hide Timeline">&times;</button><div class="tl-resizer" id="timeline-resizer" title="Drag to resize"></div></div>
         <div id="graph-area">
           <div class="cy-container" id="cy-detail-wrap"><div class="cy-canvas" id="cy-detail"></div><div class="cy-close" id="close-detail" title="Close">&times;</div></div>
           <div class="graph-divider" id="graph-divider" style="display:none"></div>
@@ -1914,7 +1932,8 @@ function buildLeftSidebar() {
             document.querySelectorAll('.cy-canvas').forEach(c => c.style.background = STATE.bgColor);
           }
 
-          updateGraphStyles();                                                                                                                                                        
+          updateGraphStyles();    
+          if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();                                                                                                                                                    
         }, 200);                                                                                                                                                    
                                                                                                                                                                     
         $$('#left-sidebar select, #left-sidebar input').forEach(el => {                                                                                             
@@ -2225,8 +2244,9 @@ function buildGraphElements(txns, mode) {
               hasIcon: !!STATE.nodeIcons[ent],
               iconUrl: STATE.nodeIcons[ent] || '',
               shape: STATE.nodeShapes[ent] || STATE.nodeShape,
-              hasCustomColor: !!STATE.nodeColors[ent],
-              customColor: STATE.nodeColors[ent] || ''
+                            hasCustomColor: !!STATE.nodeColors[ent],
+              customColor: STATE.nodeColors[ent] || '',
+              hlColor: '#f0e68c'
             }
           });                                                                                                                                                       
         }                                                                                                                                                           
@@ -2396,9 +2416,33 @@ function getCyStyle() {
         'width': 'mapData(thickness, 1, 10, 3, 12)',
       }
     },
-    {
+        {
       selector: '.dimmed',
       style: { 'opacity': 0.15 }
+    },
+        {
+      selector: '.tl-played',
+      style: { 'opacity': 1 }
+    },
+    {
+      selector: 'node.tl-played',
+      style: { 'border-color': 'data(hlColor)', 'border-width': 3, 'z-index': 12 }
+    },
+    {
+      selector: 'edge.tl-played',
+      style: { 'line-color': 'data(color)', 'target-arrow-color': 'data(color)', 'z-index': 12 }
+    },
+    {
+      selector: 'node.tl-current',
+      style: { 'border-color': 'data(hlColor)', 'border-width': 6, 'opacity': 1, 'z-index': 30 }
+    },
+    {
+      selector: 'edge.tl-current',
+      style: {
+        'line-color': 'data(color)', 'target-arrow-color': 'data(color)',
+        'opacity': 1, 'z-index': 30,
+        'width': 'mapData(thickness, 1, 10, 4, 14)'
+      }
     },
     {
       selector: '.anomaly-highlight',
@@ -2636,11 +2680,11 @@ function renderGraphs() {
   if (STATE.cyDetail) { STATE.cyDetail.destroy(); STATE.cyDetail = null; }
   if (STATE.cySummary) { STATE.cySummary.destroy(); STATE.cySummary = null; }
 
-  if (STATE.viewMode === 'detail') {
+    if (STATE.viewMode === 'detail' || STATE.viewMode === 'timeline') {
     detailWrap.style.display = '';
     summaryWrap.style.display = 'none';
     divider.style.display = 'none';
-    $('#close-detail').style.display = '';
+    $('#close-detail').style.display = STATE.viewMode === 'timeline' ? 'none' : '';
     $('#close-summary').style.display = 'none';
     const elems = buildGraphElements(txns, 'detail');
     STATE.cyDetail = renderCy('cy-detail', elems, 'detail');
@@ -2666,9 +2710,10 @@ function renderGraphs() {
   }
 
   // Timeline
-  runAnomalyDetection(txns);
+    runAnomalyDetection(txns);
   buildRightSidebar();
   renderAllAnnotations();
+  if (STATE.showTimeline) renderTimeline(txns);
 }
 
 function updateGraphStyles() {                                                                                                                                    
@@ -2737,13 +2782,15 @@ function updateViewMode() {
 
   if (STATE.viewMode === 'timeline') {
     STATE.showTimeline = true;
+    panel.style.flexBasis = (STATE.timelineHeight || 360) + 'px';
     panel.classList.add('active');
-    graphArea.style.display = 'none';
-    if (hints) hints.style.display = 'none';
-    renderTimeline(getFilteredTransactions());
+    graphArea.style.display = '';
+        if (hints) hints.style.display = '';
+    renderGraphs();
   } else {
     STATE.showTimeline = false;
     if (STATE._tlPlayInterval) { clearInterval(STATE._tlPlayInterval); STATE._tlPlayInterval = null; }
+    STATE._tlRefresh = null;
     panel.classList.remove('active');
     $('#timeline-container').innerHTML = '';
     graphArea.style.display = '';
@@ -3024,59 +3071,125 @@ function hideContextMenu() {
 /* ==========================================================================
    TIMELINE
    ========================================================================== */
-function toggleTimeline() {
-  STATE.showTimeline = !STATE.showTimeline;
-  const panel = $('#timeline-panel');
-  const graphArea = $('#graph-area');
-  const hints = $('#graph-hints');
- 
-  if (STATE.showTimeline) {
-    panel.classList.add('active');
-    graphArea.style.display = 'none';
-    if (hints) hints.style.display = 'none';
-    renderTimeline(getFilteredTransactions());
-  } else {
-    panel.classList.remove('active');
-    graphArea.style.display = '';
-    if (hints) hints.style.display = '';
+
+/* ---- timeline axis helpers ---- */
+function tlFormatTick(d, unit, spanDays) {
+  switch (unit) {
+    case 'year':    return String(d.getFullYear());
+    case 'quarter': return `Q${Math.floor(d.getMonth()/3)+1} ${d.getFullYear()}`;
+    case 'month':   return d.toLocaleDateString('en-US', {month:'short', year:'numeric'});
+    default:        return spanDays > 330
+      ? d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'2-digit'})
+      : d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
   }
 }
 
+function tlGenerateTicks(minTs, maxTs, mode, timeW) {
+  const range = maxTs - minTs || 86400000;
+  const spanDays = range / 86400000;
+  let unit = mode;
+  if (mode === 'auto') {
+    if (spanDays <= 21) unit = 'day';
+    else if (spanDays <= 120) unit = 'week';
+    else if (spanDays <= 800) unit = 'month';
+    else if (spanDays <= 2400) unit = 'quarter';
+    else unit = 'year';
+  }
+  const s = new Date(minTs);
+  let cur;
+  if (unit === 'day') cur = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+  else if (unit === 'week') { cur = new Date(s.getFullYear(), s.getMonth(), s.getDate()); cur.setDate(cur.getDate() - cur.getDay()); }
+  else if (unit === 'month') cur = new Date(s.getFullYear(), s.getMonth(), 1);
+  else if (unit === 'quarter') cur = new Date(s.getFullYear(), Math.floor(s.getMonth()/3)*3, 1);
+  else cur = new Date(s.getFullYear(), 0, 1);
+
+  const ticks = [];
+  let guard = 0;
+  while (cur.getTime() <= maxTs && guard++ < 3000) {
+    if (cur.getTime() >= minTs) ticks.push({ ts: cur.getTime(), label: tlFormatTick(cur, unit, spanDays) });
+    if (unit === 'day') cur.setDate(cur.getDate() + 1);
+    else if (unit === 'week') cur.setDate(cur.getDate() + 7);
+    else if (unit === 'month') cur.setMonth(cur.getMonth() + 1);
+    else if (unit === 'quarter') cur.setMonth(cur.getMonth() + 3);
+    else cur.setFullYear(cur.getFullYear() + 1);
+  }
+  if (!ticks.length) ticks.push({ ts: minTs, label: tlFormatTick(new Date(minTs), unit, spanDays) });
+
+  const f = STATE.timelineAxisFont;
+  const minPx = Math.max(46, (f.size || 9) * 7);
+  const maxTicks = Math.max(2, Math.floor(timeW / minPx));
+  if (ticks.length > maxTicks) {
+    const stride = Math.ceil(ticks.length / maxTicks);
+    return ticks.filter((_, i) => i % stride === 0);
+  }
+  return ticks;
+}
+
+/* Resolve one transaction to the graph elements that represent it */
+function tlElementsFor(cy, t) {
+  let coll = cy.collection();
+  const direct = cy.getElementById(`e${t.id}`);
+  if (direct.length) return coll.union(direct).union(direct.source()).union(direct.target());
+  let se = cy.getElementById(`s_${t.from}->${t.to}`);
+  if (!se.length) se = cy.getElementById(`merged_${resolveEntityToGroupNode(t.from)}|||${resolveEntityToGroupNode(t.to)}`);
+  if (se.length) return coll.union(se).union(se.source()).union(se.target());
+  [t.from, t.to].forEach(id => {
+    const n = cy.getElementById(resolveEntityToGroupNode(id));
+    if (n.length) coll = coll.union(n);
+  });
+  return coll;
+}
+
+function bindTimelineResizer() {
+  const rz = $('#timeline-resizer'), panel = $('#timeline-panel');
+  if (!rz || !panel) return;
+  let dragging = false, startY = 0, startH = 0;
+  rz.addEventListener('mousedown', e => {
+    dragging = true; startY = e.clientY;
+    startH = panel.getBoundingClientRect().height;
+    document.body.style.userSelect = 'none'; e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const h = Math.max(140, Math.min(window.innerHeight - 220, startH + (e.clientY - startY)));
+    STATE.timelineHeight = h;
+    panel.style.flexBasis = h + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false; document.body.style.userSelect = '';
+    const cy = getActiveCy(); if (cy) cy.resize();
+    if (STATE.showTimeline) renderTimeline(getFilteredTransactions());
+  });
+}
 
 function renderTimeline(txns) {
   const panel = $('#timeline-panel');
   const container = $('#timeline-container');
   container.innerHTML = '';
-  container.style.cssText = 'display:flex;flex-direction:column;height:100%;';
- 
+
   const dated = txns.filter(t => t.date);
   if (dated.length === 0) {
-    container.innerHTML = '<div style="padding:40px;color:var(--text-muted);text-align:center;font-size:14px">No dated transactions to display.</div>';
+    container.innerHTML = '<div style="padding:24px;color:var(--text-muted);text-align:center;font-size:13px">No dated transactions to display.</div>';
     return;
   }
- 
+
   dated.sort((a, b) => a.date - b.date);
   const minDate = dated[0].date.getTime();
   const maxDate = dated[dated.length - 1].date.getTime();
   const range = maxDate - minDate || 86400000;
- 
-  // Collect unique entities — maintain user-reordered list if exists
+
+  // ---- entity order (persists user drag-reorder) ----
   const entitySet = new Set();
   dated.forEach(t => { entitySet.add(t.from); entitySet.add(t.to); });
-  if (!STATE._timelineEntityOrder || !STATE._timelineEntityOrder.every(e => entitySet.has(e))) {
-    STATE._timelineEntityOrder = Array.from(entitySet).sort();
-  }
-  // Add any new entities not in saved order
-  entitySet.forEach(e => {
+  if (!STATE._timelineEntityOrder) STATE._timelineEntityOrder = [];
+  STATE._timelineEntityOrder = STATE._timelineEntityOrder.filter(e => entitySet.has(e));
+  Array.from(entitySet).sort().forEach(e => {
     if (!STATE._timelineEntityOrder.includes(e)) STATE._timelineEntityOrder.push(e);
   });
-  // Remove entities no longer in data
-  STATE._timelineEntityOrder = STATE._timelineEntityOrder.filter(e => entitySet.has(e));
- 
   const entities = STATE._timelineEntityOrder;
   let entityIdx = new Map(entities.map((e, i) => [e, i]));
- 
-  // Group by date
+
   const byDate = new Map();
   dated.forEach(t => {
     const dk = t.date.toISOString().slice(0, 10);
@@ -3084,17 +3197,20 @@ function renderTimeline(txns) {
     byDate.get(dk).push(t);
   });
   const dateKeys = Array.from(byDate.keys()).sort();
- 
-  // Layout — auto-size rows to fill available space
+
+  // ---- geometry ----
   const LABEL_W = 170;
-  const HEADER_H = 28;
-  const CTRL_H = 36;
   const panelRect = panel.getBoundingClientRect();
-  const availH = panelRect.height - CTRL_H - HEADER_H;
-  const ROW_H = Math.max(28, Math.min(70, Math.floor(availH / entities.length)));
-  const DOT_R = Math.max(4, Math.min(7, Math.floor(ROW_H / 8)));
- 
-  // Compute edge thickness scaling (same log scale as graph)
+  const availH = Math.max(80, panelRect.height - 40 /*controls*/ - 30 /*header*/ - 6 /*resizer*/);
+  const ROW_H = Math.max(26, Math.min(110, Math.floor(availH / Math.max(entities.length, 1))));
+  const DOT_R = Math.max(3.5, Math.min(7, ROW_H / 8));
+  const PAD_X = 30;
+  const baseW = Math.max((panelRect.width || 900) - LABEL_W - 24, 480);
+  let plotW = Math.round((baseW - PAD_X * 2) * (STATE.timelineZoom || 1));
+  let timeW = plotW + PAD_X * 2;
+  const xFor = ts => PAD_X + (range > 0 ? (ts - minDate) / range : 0.5) * plotW;
+
+  // ---- edge width, matches graph scaling ----
   const allAmounts = dated.map(t => Math.abs(t.amount || 0));
   const logMin = Math.log1p(Math.min(...allAmounts));
   const logMax = Math.log1p(Math.max(...allAmounts));
@@ -3104,68 +3220,134 @@ function renderTimeline(txns) {
     const t = logMax > logMin ? (Math.log1p(amt) - logMin) / (logMax - logMin) : 0.5;
     return 1 + t * 5;
   }
- 
-  // Direction color logic
   const useDir = STATE.useDirectionColors && STATE.mainEntity;
- 
-  // ── Controls bar ──
+
+  /* ================= controls ================= */
   const ctrlBar = el('div', {className: 'tl-controls'});
- 
-  const tzSel = el('select');
+
+  const tzSel = el('select', {title: 'Timezone'});
   ['America/New_York','America/Chicago','America/Denver','America/Los_Angeles','UTC','Europe/London'].forEach(tz => {
     tzSel.appendChild(el('option', {value: tz, textContent: tz.replace('America/','').replace('_',' '), ...(tz === STATE.timelineTimezone ? {selected:'selected'} : {})}));
   });
   tzSel.addEventListener('change', () => { STATE.timelineTimezone = tzSel.value; renderTimeline(txns); });
   ctrlBar.appendChild(tzSel);
- 
+
+  // --- zoom ---
+  const zoomWrap = el('div', {className: 'tl-zoom'});
+  const zoomOut = el('button', {textContent: '−', title: 'Zoom out'});
+  const zoomLbl = el('span');
+  const zoomIn  = el('button', {textContent: '+', title: 'Zoom in'});
+  const zoomFit = el('button', {textContent: 'Fit', title: 'Fit all dates in view'});
+  zoomWrap.appendChild(zoomOut); zoomWrap.appendChild(zoomLbl);
+  zoomWrap.appendChild(zoomIn); zoomWrap.appendChild(zoomFit);
+  ctrlBar.appendChild(zoomWrap);
+  function setZoom(z) {
+    STATE.timelineZoom = Math.max(1, Math.min(40, z));
+    zoomLbl.textContent = Math.round(STATE.timelineZoom * 100) + '%';
+    rebuildAll();
+  }
+  zoomOut.addEventListener('click', () => setZoom((STATE.timelineZoom || 1) / 1.5));
+  zoomIn.addEventListener('click',  () => setZoom((STATE.timelineZoom || 1) * 1.5));
+  zoomFit.addEventListener('click', () => setZoom(1));
+
+  // --- axis settings popover ---
+  const axisBtn = el('button', {textContent: '📅 Axis ▾', title: 'Date axis settings'});
+  ctrlBar.appendChild(axisBtn);
+  const pop = el('div', {className: 'tl-axis-pop'});
+  const f = STATE.timelineAxisFont;
+  pop.innerHTML = `
+    <div class="tl-axis-row"><label>Granularity</label>
+      <select id="tl-ax-mode">
+        <option value="auto">Auto</option><option value="day">Day</option>
+        <option value="week">Week</option><option value="month">Month–Year</option>
+        <option value="quarter">Quarter</option><option value="year">Year</option>
+      </select></div>
+    <div class="tl-axis-row"><label>Font</label>
+      <select id="tl-ax-family">
+        <option value="sans-serif">Sans-serif</option><option value="serif">Serif</option>
+        <option value="monospace">Monospace</option><option value="Arial">Arial</option>
+        <option value="Georgia">Georgia</option><option value="Courier New">Courier New</option>
+      </select></div>
+    <div class="tl-axis-row"><label>Size</label>
+      <input type="range" id="tl-ax-size" min="7" max="20" value="${f.size}"><span id="tl-ax-size-val" style="font-size:10px;color:var(--text-muted);width:18px">${f.size}</span></div>
+    <div class="tl-axis-row"><label>Color</label>
+      <input type="color" id="tl-ax-color" value="${f.color}" class="color-input"></div>
+    <div class="tl-axis-row"><label>Style</label>
+      <label style="text-transform:none;font-weight:normal;font-size:11px"><input type="checkbox" id="tl-ax-bold"> Bold</label>
+      <label style="text-transform:none;font-weight:normal;font-size:11px"><input type="checkbox" id="tl-ax-italic"> Italic</label></div>`;
+  container.appendChild(pop);
+  axisBtn.addEventListener('click', e => { e.stopPropagation(); pop.classList.toggle('open'); });
+  pop.addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => pop.classList.remove('open'));
+
+  $('#tl-ax-mode', pop).value = STATE.timelineAxisMode;
+  $('#tl-ax-family', pop).value = f.family;
+  $('#tl-ax-bold', pop).checked = !!f.bold;
+  $('#tl-ax-italic', pop).checked = !!f.italic;
+  function readAxis() {
+    STATE.timelineAxisMode = $('#tl-ax-mode', pop).value;
+    f.family = $('#tl-ax-family', pop).value;
+    f.size   = parseInt($('#tl-ax-size', pop).value);
+    f.color  = $('#tl-ax-color', pop).value;
+    f.bold   = $('#tl-ax-bold', pop).checked;
+    f.italic = $('#tl-ax-italic', pop).checked;
+    $('#tl-ax-size-val', pop).textContent = f.size;
+    buildHeader();
+  }
+  $$('#tl-ax-mode, #tl-ax-family, #tl-ax-size, #tl-ax-color, #tl-ax-bold, #tl-ax-italic', pop)
+    .forEach(inp => { inp.addEventListener('input', readAxis); inp.addEventListener('change', readAxis); });
+
+  // --- playback ---
   let playInterval = null, playIndex = 0;
   const playedDateSet = new Set();
- 
   const playBtn = el('button', {textContent: '▶ Play'});
   const speedSel = el('select');
-  [['Slow', 1200], ['Normal', 600], ['Fast', 250]].forEach(([label, ms]) => {
-    speedSel.appendChild(el('option', {value: String(ms), textContent: label}));
-  });
+  [['Slow',1200],['Normal',600],['Fast',250]].forEach(([label, ms]) => speedSel.appendChild(el('option', {value: String(ms), textContent: label})));
   speedSel.value = '600';
   const replayBtn = el('button', {textContent: '↺ Replay', style: 'display:none'});
   const stepLabel = el('span', {className: 'tl-step'});
- 
-  ctrlBar.appendChild(playBtn);
-  ctrlBar.appendChild(speedSel);
-  ctrlBar.appendChild(replayBtn);
-  ctrlBar.appendChild(stepLabel);
- 
-  // Legend
-  const legend = el('span', {style: 'display:flex;align-items:center;gap:12px;margin-left:16px;font-size:10px;color:var(--text-muted);'});
-  let legendHtml = `<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${STATE.nodeColor};border:1px solid rgba(255,255,255,0.15);display:inline-block;"></span> Dot = entity color</span>`;
-  if (useDir) {
-    legendHtml += `<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:14px;height:0;border-top:2px solid ${STATE.outColor};display:inline-block;"></span> Out</span>`;
-    legendHtml += `<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:14px;height:0;border-top:2px solid ${STATE.inColor};display:inline-block;"></span> In</span>`;
-  } else {
-    legendHtml += `<span style="display:inline-flex;align-items:center;gap:3px;"><span style="width:14px;height:0;border-top:1.5px dashed ${STATE.edgeColor};display:inline-block;"></span> Flow</span>`;
-  }
-  legendHtml += '<span style="opacity:0.6;">Drag rows to reorder</span>';
-  legend.innerHTML = legendHtml;
-  ctrlBar.appendChild(legend);
- 
+  ctrlBar.appendChild(playBtn); ctrlBar.appendChild(speedSel);
+  ctrlBar.appendChild(replayBtn); ctrlBar.appendChild(stepLabel);
   container.appendChild(ctrlBar);
- 
-  // ── Main body: labels + canvas ──
+
+  /* ================= body ================= */
   const body = el('div', {className: 'tl-body'});
- 
-  // Left: entity labels (draggable)
   const labelCol = el('div', {className: 'tl-labels', style: `width:${LABEL_W}px;`});
-  const labelEls = [];
- 
+  const canvasWrap = el('div', {className: 'tl-canvas-wrap'});
+  const headerBar = el('div', {className: 'tl-header'});
+  const grid = el('div', {className: 'tl-grid'});
+  canvasWrap.appendChild(headerBar); canvasWrap.appendChild(grid);
+  body.appendChild(labelCol); body.appendChild(canvasWrap);
+  container.appendChild(body);
+
+  const allDotEls = [], allLineEls = [];
+  let tickXs = [];
+
+  function buildHeader() {
+    headerBar.innerHTML = '';
+    headerBar.style.minWidth = timeW + 'px';
+        const ticks = tlGenerateTicks(minDate, maxDate, STATE.timelineAxisMode, plotW);
+    tickXs = [];
+    ticks.forEach(tk => {
+      const x = xFor(tk.ts);
+      tickXs.push(x);
+      const tick = el('div', {className: 'tl-tick', style: `left:${x}px;`});
+      tick.appendChild(el('span', {
+        className: 'tl-tick-label',
+        textContent: tk.label,
+        style: `font-family:${f.family};font-size:${f.size}px;color:${f.color};font-weight:${f.bold?'bold':'normal'};font-style:${f.italic?'italic':'normal'};`
+      }));
+      headerBar.appendChild(tick);
+    });
+    $$('.tl-grid-line', grid).forEach((ln, i) => { if (tickXs[i] != null) ln.style.left = tickXs[i] + 'px'; });
+  }
+
   function buildLabels() {
     labelCol.innerHTML = '';
-    labelEls.length = 0;
+    labelCol.style.paddingTop = '30px'; // clears the sticky header row
     entities.forEach((entity, idx) => {
       const row = el('div', {className: 'tl-label-row', style: `height:${ROW_H}px;${idx % 2 === 0 ? 'background:rgba(255,255,255,0.015);' : ''}`, title: entity, draggable: 'true'});
       row.dataset.entity = entity;
-      row.dataset.idx = String(idx);
- 
-      // Color indicator or icon
       const entityColor = STATE.nodeColors[entity] || STATE.nodeColor;
       if (STATE.nodeIcons[entity]) {
         row.appendChild(el('img', {src: STATE.nodeIcons[entity], style: `width:18px;height:18px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid ${entityColor};pointer-events:none;`}));
@@ -3173,281 +3355,182 @@ function renderTimeline(txns) {
         row.appendChild(el('span', {style: `width:9px;height:9px;border-radius:50%;background:${entityColor};flex-shrink:0;border:1px solid rgba(255,255,255,0.12);`}));
       }
       row.appendChild(el('span', {style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;', textContent: entity}));
- 
-      // Click to highlight on graph
+
       row.addEventListener('click', () => {
-        const cy = getActiveCy();
-        if (!cy) return;
-        cy.elements().removeClass('highlighted dimmed');
+        const cy = getActiveCy(); if (!cy) return;
+        cy.elements().removeClass('highlighted dimmed tl-current tl-played');
         cy.elements().addClass('dimmed');
-        const node = cy.getElementById(entity);
+        const node = cy.getElementById(resolveEntityToGroupNode(entity));
         if (node.length) {
           node.removeClass('dimmed').addClass('highlighted');
           node.connectedEdges().removeClass('dimmed').addClass('highlighted');
           node.neighborhood('node').removeClass('dimmed').addClass('highlighted');
         }
       });
- 
-      // Drag to reorder
-      row.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('text/plain', entity);
-        e.dataTransfer.effectAllowed = 'move';
-        row.classList.add('dragging');
-      });
-      row.addEventListener('dragend', () => { row.classList.remove('dragging'); });
-      row.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; row.classList.add('drag-over'); });
-      row.addEventListener('dragleave', () => { row.classList.remove('drag-over'); });
+      row.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', entity); e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('drag-over'); });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
       row.addEventListener('drop', e => {
-        e.preventDefault();
-        row.classList.remove('drag-over');
-        const draggedEntity = e.dataTransfer.getData('text/plain');
-        if (draggedEntity === entity) return;
-        const fromIdx = entities.indexOf(draggedEntity);
-        const toIdx = entities.indexOf(entity);
+        e.preventDefault(); row.classList.remove('drag-over');
+        const dragged = e.dataTransfer.getData('text/plain');
+        if (dragged === entity) return;
+        const fromIdx = entities.indexOf(dragged), toIdx = entities.indexOf(entity);
         if (fromIdx < 0 || toIdx < 0) return;
-        entities.splice(fromIdx, 1);
-        entities.splice(toIdx, 0, draggedEntity);
+        entities.splice(fromIdx, 1); entities.splice(toIdx, 0, dragged);
         STATE._timelineEntityOrder = [...entities];
         entityIdx = new Map(entities.map((e2, i) => [e2, i]));
         rebuildContent();
       });
- 
       labelCol.appendChild(row);
-      labelEls.push(row);
     });
   }
- 
-  body.appendChild(labelCol);
- 
-  // Right: time header + grid with dots/lines
-  const canvasWrap = el('div', {className: 'tl-canvas-wrap'});
- 
-  // Time header
-  const headerBar = el('div', {className: 'tl-header'});
-  const canvasRect = panelRect.width - LABEL_W - 20;
-  const timeW = Math.max(canvasRect, 600);
-  headerBar.style.minWidth = timeW + 'px';
- 
-  const numTicks = Math.min(24, Math.ceil(timeW / 70));
-  for (let i = 0; i <= numTicks; i++) {
-    const x = (i / numTicks) * timeW;
-    const d = new Date(minDate + (range * i / numTicks));
-    const tick = el('div', {className: 'tl-tick', style: `left:${x}px;`});
-    const fmt = range > 365 * 86400000
-      ? d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'2-digit'})
-      : d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
-    tick.appendChild(el('span', {className: 'tl-tick-label', textContent: fmt}));
-    headerBar.appendChild(tick);
-  }
-  canvasWrap.appendChild(headerBar);
- 
-  // Grid area
-  const grid = el('div', {className: 'tl-grid', style: `min-width:${timeW}px;`});
- 
-  // All content lives here — rebuilt on reorder
-  const allDotEls = [];
-  const allLineEls = [];
- 
+
   function rebuildContent() {
     grid.innerHTML = '';
-    allDotEls.length = 0;
-    allLineEls.length = 0;
+    allDotEls.length = 0; allLineEls.length = 0;
+        grid.style.width = timeW + 'px';
+    grid.style.height = (entities.length * ROW_H) + 'px';
+    canvasWrap.style.width = timeW + 'px';
     buildLabels();
- 
-    // Row backgrounds
+
     entities.forEach((entity, idx) => {
-      const bg = el('div', {className: 'tl-row-bg', style: `top:${idx * ROW_H}px;height:${ROW_H}px;${idx % 2 === 0 ? 'background:rgba(255,255,255,0.015);' : ''}`});
-      grid.appendChild(bg);
+      grid.appendChild(el('div', {className: 'tl-row-bg', style: `top:${idx*ROW_H}px;height:${ROW_H}px;${idx%2===0?'background:rgba(255,255,255,0.015);':''}`}));
     });
- 
-    // Vertical grid lines
-    for (let i = 0; i <= numTicks; i++) {
-      const x = (i / numTicks) * timeW;
-      grid.appendChild(el('div', {className: 'tl-grid-line', style: `left:${x}px;`}));
-    }
- 
-    // SVG overlay for flow lines
+    tickXs.forEach(x => grid.appendChild(el('div', {className: 'tl-grid-line', style: `left:${x}px;`})));
+
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
-    svg.style.cssText = `position:absolute;top:0;left:0;width:${timeW}px;height:${entities.length * ROW_H}px;pointer-events:none;z-index:10;overflow:visible;`;
+    svg.style.cssText = `position:absolute;top:0;left:0;pointer-events:none;z-index:10;overflow:visible;`;
     svg.setAttribute('width', String(timeW));
     svg.setAttribute('height', String(entities.length * ROW_H));
- 
-    // Arrow marker using context-stroke so it inherits line color
     const defs = document.createElementNS(svgNS, 'defs');
     const marker = document.createElementNS(svgNS, 'marker');
     marker.setAttribute('id', 'tl-arrow');
-    marker.setAttribute('viewBox', '0 0 10 10');
-    marker.setAttribute('refX', '9');
-    marker.setAttribute('refY', '5');
-    marker.setAttribute('markerWidth', '5');
-    marker.setAttribute('markerHeight', '5');
+        marker.setAttribute('viewBox', '0 0 8 8');
+    marker.setAttribute('refX', '7'); marker.setAttribute('refY', '4');
+    marker.setAttribute('markerWidth', '8'); marker.setAttribute('markerHeight', '8');
+    marker.setAttribute('markerUnits', 'userSpaceOnUse');
     marker.setAttribute('orient', 'auto');
     const arrowPath = document.createElementNS(svgNS, 'path');
-    arrowPath.setAttribute('d', 'M 0 1 L 8 5 L 0 9 z');
+    arrowPath.setAttribute('d', 'M 0 0.5 L 7 4 L 0 7.5 z');
     arrowPath.setAttribute('fill', 'context-stroke');
-    marker.appendChild(arrowPath);
-    defs.appendChild(marker);
-    svg.appendChild(defs);
- 
-    // Dot stacking tracker
+    marker.appendChild(arrowPath); defs.appendChild(marker); svg.appendChild(defs);
+
     const dotCountMap = new Map();
- 
     dated.forEach(t => {
-      const timeFrac = range > 0 ? (t.date.getTime() - minDate) / range : 0.5;
-      const x = timeFrac * timeW;
+            const x = xFor(t.date.getTime());
       const dateKey = t.date.toISOString().slice(0, 10);
-      const fromI = entityIdx.get(t.from);
-      const toI = entityIdx.get(t.to);
+      const fromI = entityIdx.get(t.from), toI = entityIdx.get(t.to);
       if (fromI === undefined || toI === undefined) return;
-      const fromY = fromI * ROW_H + ROW_H / 2;
-      const toY = toI * ROW_H + ROW_H / 2;
- 
+      const fromY = fromI * ROW_H + ROW_H / 2, toY = toI * ROW_H + ROW_H / 2;
+
       function getDotOffset(entity) {
         const key = `${entity}||${dateKey}`;
         const count = dotCountMap.get(key) || 0;
         dotCountMap.set(key, count + 1);
         return (count % 3 - 1) * Math.min(10, ROW_H * 0.2);
       }
- 
-      // Line color: match graph direction settings
+
       let lineColor, lineOpacity;
       if (useDir) {
         if (t.to === STATE.mainEntity) { lineColor = STATE.inColor; lineOpacity = 0.6; }
         else if (t.from === STATE.mainEntity) { lineColor = STATE.outColor; lineOpacity = 0.6; }
         else { lineColor = STATE.edgeColor; lineOpacity = 0.2; }
-      } else {
-        lineColor = STATE.edgeColor;
-        lineOpacity = 0.3;
-      }
- 
-      // Line thickness: match graph scaling
+      } else { lineColor = STATE.edgeColor; lineOpacity = 0.3; }
+
       const lw = getLineWidth(t.amount);
- 
-      // SVG flow line with animation
       const line = document.createElementNS(svgNS, 'line');
-      line.setAttribute('x1', String(x));
-      line.setAttribute('y1', String(fromY));
-      line.setAttribute('x2', String(x));
-      line.setAttribute('y2', String(toY));
+      line.setAttribute('x1', String(x)); line.setAttribute('y1', String(fromY));
+      line.setAttribute('x2', String(x)); line.setAttribute('y2', String(toY));
       line.setAttribute('stroke', lineColor);
       line.setAttribute('stroke-opacity', String(lineOpacity));
       line.setAttribute('stroke-width', String(lw));
-      line.setAttribute('stroke-dasharray', `${Math.max(6, lw * 3)},${Math.max(3, lw * 1.5)}`);
+      line.setAttribute('stroke-dasharray', `${Math.max(6, lw*3)},${Math.max(3, lw*1.5)}`);
       line.setAttribute('marker-end', 'url(#tl-arrow)');
       line.classList.add('tl-flow-line');
-      line.dataset.txnId = String(t.id);
-      line.dataset.dateKey = dateKey;
       svg.appendChild(line);
       allLineEls.push({el: line, txn: t, dateKey});
- 
-      // FROM dot
-      const fromColor = STATE.nodeColors[t.from] || STATE.nodeColor;
-      const fromDot = el('div', {
-        className: 'tl-dot',
-        style: `left:${x}px;top:${fromY + getDotOffset(t.from)}px;transform:translate(-50%,-50%);width:${DOT_R*2}px;height:${DOT_R*2}px;background:${fromColor};border-color:${fromColor};`,
-        title: `→ ${t.to}\n${formatAmount(Math.abs(t.amount))}\n${t.date.toLocaleDateString()}${t.desc ? '\n' + t.desc : ''}`
+
+      [['from', t.from, fromY], ['to', t.to, toY]].forEach(([kind, ent, baseY]) => {
+        const c = STATE.nodeColors[ent] || STATE.nodeColor;
+        const dot = el('div', {
+          className: 'tl-dot',
+          style: `left:${x}px;top:${baseY + getDotOffset(ent)}px;transform:translate(-50%,-50%);width:${DOT_R*2}px;height:${DOT_R*2}px;background:${c};border-color:${c};`,
+          title: `${kind === 'from' ? '→ ' + t.to : '← ' + t.from}\n${formatAmount(Math.abs(t.amount))}\n${t.date.toLocaleDateString()}${t.desc ? '\n' + t.desc : ''}`
+        });
+        dot.addEventListener('click', e => { e.stopPropagation(); highlightTxnOnGraph(t); });
+        grid.appendChild(dot);
+        allDotEls.push({el: dot, txn: t, dateKey, type: kind});
       });
-      fromDot.addEventListener('click', e => { e.stopPropagation(); highlightTxnOnGraph(t); });
-      grid.appendChild(fromDot);
-      allDotEls.push({el: fromDot, txn: t, dateKey, type: 'from'});
- 
-      // TO dot
-      const toColor = STATE.nodeColors[t.to] || STATE.nodeColor;
-      const toDot = el('div', {
-        className: 'tl-dot',
-        style: `left:${x}px;top:${toY + getDotOffset(t.to)}px;transform:translate(-50%,-50%);width:${DOT_R*2}px;height:${DOT_R*2}px;background:${toColor};border-color:${toColor};`,
-        title: `← ${t.from}\n${formatAmount(Math.abs(t.amount))}\n${t.date.toLocaleDateString()}${t.desc ? '\n' + t.desc : ''}`
-      });
-      toDot.addEventListener('click', e => { e.stopPropagation(); highlightTxnOnGraph(t); });
-      grid.appendChild(toDot);
-      allDotEls.push({el: toDot, txn: t, dateKey, type: 'to'});
     });
- 
     grid.appendChild(svg);
- 
-    // Gap detection
+
+    // gap overlays
     if (dated.length > 2) {
-      const sortedDates = [...new Set(dated.map(t => t.date.toISOString().slice(0, 10)))].sort();
+      const sortedDates = [...new Set(dated.map(t => t.date.toISOString().slice(0,10)))].sort();
       for (let i = 1; i < sortedDates.length; i++) {
-        const d1 = new Date(sortedDates[i - 1]).getTime();
-        const d2 = new Date(sortedDates[i]).getTime();
+        const d1 = new Date(sortedDates[i-1]).getTime(), d2 = new Date(sortedDates[i]).getTime();
         const daysDiff = (d2 - d1) / 86400000;
         if (daysDiff > 14) {
-          const x1 = ((d1 - minDate) / range) * timeW;
-          const x2 = ((d2 - minDate) / range) * timeW;
-          const overlay = el('div', {className: 'tl-gap-overlay', style: `left:${x1}px;width:${x2 - x1}px;`});
+                    const x1 = xFor(d1), x2 = xFor(d2);
+          const overlay = el('div', {className: 'tl-gap-overlay', style: `left:${x1}px;width:${x2-x1}px;`});
           overlay.appendChild(el('div', {className: 'tl-gap-label', textContent: `${Math.round(daysDiff)}d gap`}));
           grid.appendChild(overlay);
         }
       }
     }
-  }
- 
-  canvasWrap.appendChild(grid);
-  body.appendChild(canvasWrap);
-  container.appendChild(body);
- 
-  // Initial build
-  rebuildContent();
- 
-  // ── Helpers ──
-  function highlightTxnOnGraph(t) {
-    const cy = getActiveCy();
-    if (!cy) return;
-    cy.elements().removeClass('highlighted dimmed');
-    cy.elements().addClass('dimmed');
-    const edge = cy.getElementById(`e${t.id}`);
-    if (edge.length) {
-      edge.removeClass('dimmed').addClass('highlighted');
-      edge.source().removeClass('dimmed').addClass('highlighted');
-      edge.target().removeClass('dimmed').addClass('highlighted');
-    } else {
-      let sEdge = cy.getElementById(`s_${t.from}->${t.to}`);
-      if (!sEdge.length) sEdge = cy.getElementById(`s_${t.to}->${t.from}`);
-      if (sEdge.length) {
-        sEdge.removeClass('dimmed').addClass('highlighted');
-        sEdge.source().removeClass('dimmed').addClass('highlighted');
-        sEdge.target().removeClass('dimmed').addClass('highlighted');
-      } else {
-        [t.from, t.to].forEach(id => {
-          const n = cy.getElementById(id);
-          if (n.length) n.removeClass('dimmed').addClass('highlighted');
-        });
-      }
-    }
-  }
- 
-  // ── Playback ──
-  let clickedDateKey = null;
- 
-  function highlightDateOnGraph(dateKey) {
-    const dateTxns = byDate.get(dateKey) || [];
-    const cy = getActiveCy();
-    if (!cy) return;
-    dateTxns.forEach(t => {
-      const edge = cy.getElementById(`e${t.id}`);
-      if (edge.length) {
-        edge.removeClass('dimmed').addClass('highlighted');
-        edge.source().removeClass('dimmed').addClass('highlighted');
-        edge.target().removeClass('dimmed').addClass('highlighted');
-      } else {
-        let sEdge = cy.getElementById(`s_${t.from}->${t.to}`);
-        if (!sEdge.length) sEdge = cy.getElementById(`s_${t.to}->${t.from}`);
-        if (sEdge.length) {
-          sEdge.removeClass('dimmed').addClass('highlighted');
-          sEdge.source().removeClass('dimmed').addClass('highlighted');
-          sEdge.target().removeClass('dimmed').addClass('highlighted');
-        } else {
-          [t.from, t.to].forEach(id => {
-            const n = cy.getElementById(id);
-            if (n.length) n.removeClass('dimmed').addClass('highlighted');
-          });
-        }
-      }
+    // restore playback visuals after a rebuild
+    playedDateSet.forEach(dk => {
+      allDotEls.forEach(d => { if (d.dateKey === dk) d.el.classList.add('played'); });
+      allLineEls.forEach(l => { if (l.dateKey === dk) l.el.classList.add('played'); });
     });
   }
- 
+
+    function rebuildAll() {
+    plotW = Math.round((baseW - PAD_X * 2) * (STATE.timelineZoom || 1));
+    timeW = plotW + PAD_X * 2;
+    buildHeader();
+    rebuildContent();
+  }
+  STATE._tlRefresh = rebuildAll;
+
+  zoomLbl.textContent = Math.round((STATE.timelineZoom || 1) * 100) + '%';
+  rebuildAll();
+
+  /* ================= graph sync ================= */
+  function highlightTxnOnGraph(t) {
+    const cy = getActiveCy(); if (!cy) return;
+    cy.elements().removeClass('highlighted dimmed tl-current tl-played');
+        cy.elements().addClass('dimmed');
+    let c = '#f0e68c';
+    if (useDir) {
+      if (t.to === STATE.mainEntity) c = STATE.inColor;
+      else if (t.from === STATE.mainEntity) c = STATE.outColor;
+      else c = STATE.edgeColor;
+    }
+    const els = tlElementsFor(cy, t);
+    els.nodes().forEach(n => n.data('hlColor', c));
+    els.removeClass('dimmed').addClass('tl-current');
+}
+  function highlightDateOnGraph(dateKey) {
+    const cy = getActiveCy(); if (!cy) return;
+        cy.$('.tl-current').removeClass('tl-current').addClass('tl-played');
+    let coll = cy.collection();
+    (byDate.get(dateKey) || []).forEach(t => {
+      let c = '#f0e68c';
+      if (useDir) {
+        if (t.to === STATE.mainEntity) c = STATE.inColor;
+        else if (t.from === STATE.mainEntity) c = STATE.outColor;
+        else c = STATE.edgeColor;
+      }
+      const els = tlElementsFor(cy, t);
+      els.nodes().forEach(n => n.data('hlColor', c));
+      coll = coll.union(els);
+    });
+    coll.removeClass('dimmed tl-played').addClass('tl-current');
+  }
+
   function markDatePlayed(dateKey) {
     playedDateSet.add(dateKey);
     allDotEls.forEach(d => {
@@ -3458,23 +3541,27 @@ function renderTimeline(txns) {
       if (l.dateKey === dateKey) { l.el.classList.add('active'); l.el.classList.remove('played'); }
       else if (playedDateSet.has(l.dateKey)) { l.el.classList.remove('active'); l.el.classList.add('played'); }
     });
+    // keep the playhead in view when zoomed in
+            const x = xFor(new Date(dateKey).getTime());
+    const w = body.clientWidth - LABEL_W;
+    if (x < body.scrollLeft || x > body.scrollLeft + w - 40) {
+      body.scrollLeft = Math.max(0, x - w / 2);
+    }
   }
- 
+
   function stopPlay() {
     clearInterval(playInterval); playInterval = null; STATE._tlPlayInterval = null;
     playBtn.textContent = '▶ Resume'; replayBtn.style.display = '';
   }
- 
   function resetPlay() {
     playIndex = 0; stepLabel.textContent = '';
-    playedDateSet.clear(); clickedDateKey = null;
+    playedDateSet.clear();
     playBtn.textContent = '▶ Play'; replayBtn.style.display = 'none';
-    allDotEls.forEach(d => d.el.classList.remove('played', 'playing'));
-    allLineEls.forEach(l => l.el.classList.remove('active', 'played'));
+    allDotEls.forEach(d => d.el.classList.remove('played','playing'));
+    allLineEls.forEach(l => l.el.classList.remove('active','played'));
     const cy = getActiveCy();
-    if (cy) cy.elements().removeClass('highlighted dimmed anomaly-highlight');
+    if (cy) cy.elements().removeClass('highlighted dimmed anomaly-highlight tl-current tl-played');
   }
- 
   function playStep() {
     if (!playInterval) return;
     if (playIndex >= dateKeys.length) { stopPlay(); return; }
@@ -3484,22 +3571,18 @@ function renderTimeline(txns) {
     highlightDateOnGraph(dateKey);
     playIndex++;
   }
- 
+
   replayBtn.addEventListener('click', resetPlay);
- 
   playBtn.addEventListener('click', () => {
     if (playInterval) { stopPlay(); return; }
-    if (clickedDateKey && dateKeys.includes(clickedDateKey)) {
-      playIndex = dateKeys.indexOf(clickedDateKey);
-    } else if (playedDateSet.size === 0) { playIndex = 0; }
-    clickedDateKey = null;
+    if (playedDateSet.size === 0) playIndex = 0;
     playBtn.textContent = '⏹ Stop'; replayBtn.style.display = 'none';
     const cy = getActiveCy();
-    if (cy) { cy.elements().removeClass('highlighted dimmed anomaly-highlight'); cy.elements().addClass('dimmed'); }
+    if (cy) { cy.elements().removeClass('highlighted anomaly-highlight tl-current tl-played'); cy.elements().addClass('dimmed'); }
     playInterval = STATE._tlPlayInterval = setInterval(playStep, parseInt(speedSel.value));
   });
- 
 }
+
 
 /* ==========================================================================
    NARRATIVE SUMMARY
@@ -3699,10 +3782,11 @@ function bindGlobalEvents() {
   // Close buttons
   $('#detail-close').addEventListener('click', hideDetailPanel);
 $('#timeline-close').addEventListener('click', () => {
-    STATE.viewMode = 'summary';
-    $$('.view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === 'summary'));
+    STATE.viewMode = 'detail';
+    $$('.view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === 'detail'));
     updateViewMode();
 });
+bindTimelineResizer();
   $('#summary-close').addEventListener('click', () => $('#summary-modal').classList.remove('active'));
   $('#summary-copy').addEventListener('click', () => {
     navigator.clipboard.writeText(STATE.summaryText).then(() => alert('Copied to clipboard.'));
@@ -3936,7 +4020,7 @@ function applyGroupsToElements(nodes, edges) {
     let totalIn = 0, totalOut = 0, txnCount = 0; const memberList = [];
     g.members.forEach(m => { const eData = STATE.entities.get(m); if (eData) { totalIn += eData.totalIn; totalOut += eData.totalOut; txnCount += eData.txnCount; memberList.push(m); } });
     const sz = typeof STATE.nodeSize === 'number' ? Math.max(STATE.nodeSize, 55) : 55;
-    groupNodes.push({data: {id: getGroupNodeId(g), label: `${g.name}\n(${g.members.size} entities)`, size: sz, txnCount, totalIn, totalOut, isGroup: true, groupId: g.id, groupColor: g.color, shape: 'hexagon', hasIcon: false, iconUrl: ''}});
+    groupNodes.push({data: {id: getGroupNodeId(g), label: `${g.name}\n(${g.members.size} entities)`, size: sz, txnCount, totalIn, totalOut, isGroup: true, groupId: g.id, groupColor: g.color, shape: 'hexagon', hasIcon: false, iconUrl: '', hlColor: '#f0e68c'}});
   });
   const mergedEdgeMap = new Map(); const filteredEdges = [];
   edges.forEach(e => {
