@@ -350,6 +350,8 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 .tl-flow-line.paused { animation-play-state:paused; }
 .tl-flow-line.active { stroke-opacity:0.9 !important; filter:drop-shadow(0 0 3px rgba(88,166,255,0.5)); }
 .tl-flow-line.played { stroke-opacity:0.5 !important; }
+.tl-dot.tl-future { opacity:0.06 !important; transition:opacity 0.3s; }
+.tl-flow-line.tl-future { opacity:0.04 !important; animation-play-state:paused; transition:opacity 0.3s; }
 .tl-gap-overlay { position:absolute; top:0; bottom:0; background:rgba(248,81,73,0.04); pointer-events:none; z-index:2; }
 .tl-gap-label { position:absolute; top:4px; left:50%; transform:translateX(-50%); font-size:8px; color:#f85149; white-space:nowrap; pointer-events:none; z-index:3; background:rgba(13,17,23,0.85); padding:1px 5px; border-radius:2px; }
 
@@ -404,8 +406,11 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   timelineZoom: 1,
   timelineHeight: 360,
    timelineAxisMode: 'auto',
-    timelineLineMode: 'match',
+  timelineLineMode: 'match',
   timelineSourceColors: {},
+  timelineDotScale: 1,
+  timelineLineScale: 1,
+  timelineArrowSize: 8,
   timelineAxisFont: { family: 'sans-serif', size: 9, color: '#8b949e', bold: false, italic: false },
   _tlPlayInterval: null,
   _tlRefresh: null,
@@ -2419,9 +2424,13 @@ function getCyStyle() {
         'width': 'mapData(thickness, 1, 10, 3, 12)',
       }
     },
-        {
+                {
       selector: '.dimmed',
       style: { 'opacity': 0.15 }
+    },
+    {
+      selector: '.tl-dimmed',
+      style: { 'opacity': 0.05 }
     },
         {
       selector: '.tl-played',
@@ -3231,7 +3240,7 @@ function renderTimeline(txns) {
   const panelRect = panel.getBoundingClientRect();
   const availH = Math.max(80, panelRect.height - 40 /*controls*/ - 30 /*header*/ - 6 /*resizer*/);
   const ROW_H = Math.max(26, Math.min(110, Math.floor(availH / Math.max(entities.length, 1))));
-  const DOT_R = Math.max(3.5, Math.min(7, ROW_H / 8));
+    const DOT_R = Math.max(3.5, Math.min(7, ROW_H / 8)) * (STATE.timelineDotScale || 1);
   const PAD_X = 30;
   const baseW = Math.max((panelRect.width || 900) - LABEL_W - 24, 480);
   let plotW = Math.round((baseW - PAD_X * 2) * (STATE.timelineZoom || 1));
@@ -3242,11 +3251,12 @@ function renderTimeline(txns) {
   const allAmounts = dated.map(t => Math.abs(t.amount || 0));
   const logMin = Math.log1p(Math.min(...allAmounts));
   const logMax = Math.log1p(Math.max(...allAmounts));
-  function getLineWidth(amount) {
-    if (!STATE.edgeThicknessScale) return STATE.uniformEdgeWidth || 2;
+    function getLineWidth(amount) {
+    const s = STATE.timelineLineScale || 1;
+    if (!STATE.edgeThicknessScale) return (STATE.uniformEdgeWidth || 2) * s;
     const amt = Math.abs(amount || 0);
     const t = logMax > logMin ? (Math.log1p(amt) - logMin) / (logMax - logMin) : 0.5;
-    return 1 + t * 5;
+    return (1 + t * 5) * s;
   }
     let useDir = STATE.useDirectionColors && STATE.mainEntity;
   let srcColors = tlSourceColorMap();
@@ -3294,7 +3304,7 @@ function renderTimeline(txns) {
   ctrlBar.appendChild(lineModeSel);
 
   // --- axis settings popover ---
-  const axisBtn = el('button', {textContent: '📅 Axis ▾', title: 'Date axis settings'});
+  const axisBtn = el('button', {textContent: '⚙ Display ▾', title: 'Timeline display settings'});
   ctrlBar.appendChild(axisBtn);
   const pop = el('div', {className: 'tl-axis-pop'});
   const f = STATE.timelineAxisFont;
@@ -3317,7 +3327,14 @@ function renderTimeline(txns) {
       <input type="color" id="tl-ax-color" value="${f.color}" class="color-input"></div>
     <div class="tl-axis-row"><label>Style</label>
       <label style="text-transform:none;font-weight:normal;font-size:11px"><input type="checkbox" id="tl-ax-bold"> Bold</label>
-      <label style="text-transform:none;font-weight:normal;font-size:11px"><input type="checkbox" id="tl-ax-italic"> Italic</label></div>`;
+      <label style="text-transform:none;font-weight:normal;font-size:11px"><input type="checkbox" id="tl-ax-italic"> Italic</label></div>
+          <div style="height:1px;background:var(--border);margin:8px 0;"></div>
+    <div class="tl-axis-row"><label>Dot size</label>
+      <input type="range" id="tl-dot-scale" min="0.5" max="3" step="0.1" value="${STATE.timelineDotScale}"><span id="tl-dot-val" style="font-size:10px;color:var(--text-muted);width:22px">${STATE.timelineDotScale}×</span></div>
+    <div class="tl-axis-row"><label>Line width</label>
+      <input type="range" id="tl-line-scale" min="0.3" max="4" step="0.1" value="${STATE.timelineLineScale}"><span id="tl-line-val" style="font-size:10px;color:var(--text-muted);width:22px">${STATE.timelineLineScale}×</span></div>
+    <div class="tl-axis-row"><label>Arrow size</label>
+      <input type="range" id="tl-arrow-size" min="0" max="20" step="1" value="${STATE.timelineArrowSize}"><span id="tl-arrow-val" style="font-size:10px;color:var(--text-muted);width:22px">${STATE.timelineArrowSize}</span></div>`;
   container.appendChild(pop);
   axisBtn.addEventListener('click', e => { e.stopPropagation(); pop.classList.toggle('open'); });
   pop.addEventListener('click', e => e.stopPropagation());
@@ -3337,6 +3354,18 @@ function renderTimeline(txns) {
     $('#tl-ax-size-val', pop).textContent = f.size;
     buildHeader();
   }
+
+  function readSizes() {
+    STATE.timelineDotScale  = parseFloat($('#tl-dot-scale', pop).value);
+    STATE.timelineLineScale = parseFloat($('#tl-line-scale', pop).value);
+    STATE.timelineArrowSize = parseInt($('#tl-arrow-size', pop).value);
+    $('#tl-dot-val', pop).textContent   = STATE.timelineDotScale + '×';
+    $('#tl-line-val', pop).textContent  = STATE.timelineLineScale + '×';
+    $('#tl-arrow-val', pop).textContent = STATE.timelineArrowSize;
+    renderTimeline(txns);
+  }
+  $$('#tl-dot-scale, #tl-line-scale, #tl-arrow-size', pop)
+    .forEach(inp => inp.addEventListener('change', readSizes));
   $$('#tl-ax-mode, #tl-ax-family, #tl-ax-size, #tl-ax-color, #tl-ax-bold, #tl-ax-italic', pop)
     .forEach(inp => { inp.addEventListener('input', readAxis); inp.addEventListener('change', readAxis); });
 
@@ -3444,7 +3473,7 @@ function renderTimeline(txns) {
 
       row.addEventListener('click', () => {
         const cy = getActiveCy(); if (!cy) return;
-        cy.elements().removeClass('highlighted dimmed tl-current tl-played');
+        cy.elements().removeClass('highlighted dimmed tl-dimmed tl-current tl-played');
         cy.elements().addClass('dimmed');
         const node = cy.getElementById(resolveEntityToGroupNode(entity));
         if (node.length) {
@@ -3493,9 +3522,10 @@ function renderTimeline(txns) {
     const defs = document.createElementNS(svgNS, 'defs');
     const marker = document.createElementNS(svgNS, 'marker');
     marker.setAttribute('id', 'tl-arrow');
-        marker.setAttribute('viewBox', '0 0 8 8');
+    const aSz = STATE.timelineArrowSize || 8;
+    marker.setAttribute('viewBox', '0 0 8 8');
     marker.setAttribute('refX', '7'); marker.setAttribute('refY', '4');
-    marker.setAttribute('markerWidth', '8'); marker.setAttribute('markerHeight', '8');
+    marker.setAttribute('markerWidth', String(aSz)); marker.setAttribute('markerHeight', String(aSz));
     marker.setAttribute('markerUnits', 'userSpaceOnUse');
     marker.setAttribute('orient', 'auto');
     const arrowPath = document.createElementNS(svgNS, 'path');
@@ -3570,13 +3600,20 @@ function renderTimeline(txns) {
       }
     }
     // restore playback visuals after a rebuild
-    playedDateSet.forEach(dk => {
-      allDotEls.forEach(d => { if (d.dateKey === dk) d.el.classList.add('played'); });
-      allLineEls.forEach(l => { if (l.dateKey === dk) l.el.classList.add('played'); });
-    });
+    if (playedDateSet.size > 0) {
+      grid.classList.add('tl-playing');
+      allDotEls.forEach(d => {
+        if (playedDateSet.has(d.dateKey)) d.el.classList.add('played');
+        else d.el.classList.add('tl-future');
+      });
+      allLineEls.forEach(l => {
+        if (playedDateSet.has(l.dateKey)) l.el.classList.add('played');
+        else l.el.classList.add('tl-future');
+      });
+    }
   }
 
-      function rebuildAll() {
+  function rebuildAll() {
     plotW = Math.round((baseW - PAD_X * 2) * (STATE.timelineZoom || 1));
     timeW = plotW + PAD_X * 2;
     useDir = STATE.useDirectionColors && STATE.mainEntity;
@@ -3604,7 +3641,7 @@ function renderTimeline(txns) {
     }
     const els = tlElementsFor(cy, t);
     els.nodes().forEach(n => n.data('hlColor', c));
-    els.removeClass('dimmed').addClass('tl-current');
+    els.removeClass('dimmed tl-dimmed').addClass('tl-current');
 }
   function highlightDateOnGraph(dateKey) {
     const cy = getActiveCy(); if (!cy) return;
@@ -3621,18 +3658,18 @@ function renderTimeline(txns) {
       els.nodes().forEach(n => n.data('hlColor', c));
       coll = coll.union(els);
     });
-    coll.removeClass('dimmed tl-played').addClass('tl-current');
+    coll.removeClass('dimmed tl-dimmed tl-played').addClass('tl-current');
   }
 
   function markDatePlayed(dateKey) {
     playedDateSet.add(dateKey);
     allDotEls.forEach(d => {
-      if (d.dateKey === dateKey) { d.el.classList.add('playing'); d.el.classList.remove('played'); }
-      else if (playedDateSet.has(d.dateKey)) { d.el.classList.remove('playing'); d.el.classList.add('played'); }
+      if (d.dateKey === dateKey) { d.el.classList.remove('tl-future', 'played'); d.el.classList.add('playing'); }
+      else if (playedDateSet.has(d.dateKey)) { d.el.classList.remove('playing', 'tl-future'); d.el.classList.add('played'); }
     });
     allLineEls.forEach(l => {
-      if (l.dateKey === dateKey) { l.el.classList.add('active'); l.el.classList.remove('played'); }
-      else if (playedDateSet.has(l.dateKey)) { l.el.classList.remove('active'); l.el.classList.add('played'); }
+      if (l.dateKey === dateKey) { l.el.classList.remove('tl-future', 'played'); l.el.classList.add('active'); }
+      else if (playedDateSet.has(l.dateKey)) { l.el.classList.remove('active', 'tl-future'); l.el.classList.add('played'); }
     });
     // keep the playhead in view when zoomed in
             const x = xFor(new Date(dateKey).getTime());
@@ -3650,10 +3687,11 @@ function renderTimeline(txns) {
     playIndex = 0; stepLabel.textContent = '';
     playedDateSet.clear();
     playBtn.textContent = '▶ Play'; replayBtn.style.display = 'none';
-    allDotEls.forEach(d => d.el.classList.remove('played','playing'));
-    allLineEls.forEach(l => l.el.classList.remove('active','played'));
+    grid.classList.remove('tl-playing');
+    allDotEls.forEach(d => d.el.classList.remove('played','playing','tl-future'));
+    allLineEls.forEach(l => l.el.classList.remove('active','played','tl-future'));
     const cy = getActiveCy();
-    if (cy) cy.elements().removeClass('highlighted dimmed anomaly-highlight tl-current tl-played');
+    if (cy) cy.elements().removeClass('highlighted dimmed tl-dimmed anomaly-highlight tl-current tl-played');
   }
   function playStep() {
     if (!playInterval) return;
@@ -3670,8 +3708,11 @@ function renderTimeline(txns) {
     if (playInterval) { stopPlay(); return; }
     if (playedDateSet.size === 0) playIndex = 0;
     playBtn.textContent = '⏹ Stop'; replayBtn.style.display = 'none';
+    grid.classList.add('tl-playing');
+    allDotEls.forEach(d => { if (!playedDateSet.has(d.dateKey)) d.el.classList.add('tl-future'); });
+    allLineEls.forEach(l => { if (!playedDateSet.has(l.dateKey)) l.el.classList.add('tl-future'); });
     const cy = getActiveCy();
-    if (cy) { cy.elements().removeClass('highlighted anomaly-highlight tl-current tl-played'); cy.elements().addClass('dimmed'); }
+    if (cy) { cy.elements().removeClass('highlighted anomaly-highlight tl-current tl-played'); cy.elements().addClass('tl-dimmed'); }
     playInterval = STATE._tlPlayInterval = setInterval(playStep, parseInt(speedSel.value));
   });
 }
@@ -3923,7 +3964,7 @@ bindTimelineResizer();
       $('#summary-modal').classList.remove('active');
       $('#export-modal').classList.remove('active');
       const cy = getActiveCy();
-      if (cy) cy.elements().removeClass('highlighted dimmed anomaly-highlight path-highlight');
+      if (cy) cy.elements().removeClass('highlighted dimmed tl-dimmed anomaly-highlight path-highlight tl-current tl-played');
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       const cy = getActiveCy();
