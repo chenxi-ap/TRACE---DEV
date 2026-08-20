@@ -403,7 +403,9 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   timelineTimezone: 'America/New_York',
   timelineZoom: 1,
   timelineHeight: 360,
-  timelineAxisMode: 'auto',
+   timelineAxisMode: 'auto',
+    timelineLineMode: 'match',
+  timelineSourceColors: {},
   timelineAxisFont: { family: 'sans-serif', size: 9, color: '#8b949e', bold: false, italic: false },
   _tlPlayInterval: null,
   _tlRefresh: null,
@@ -1995,7 +1997,8 @@ function buildLeftSidebar() {
         });
 
         $('#reset-edge-style').addEventListener('click', e => {                                                                                                     
-          e.stopPropagation();                                                                                                                                    
+          e.stopPropagation();             
+          STATE.timelineSourceColors = {};                                                                                                                       
           STATE.edgeColor = DEFAULTS.edgeColor;                                                                                                                     
           STATE.showArrows = DEFAULTS.showArrows;                                                                                                                   
           STATE.arrowSize = DEFAULTS.arrowSize;                                                                                                                     
@@ -2950,7 +2953,7 @@ if (type === 'node') {
       const colorItem = el('div', {className: 'context-menu-item', style: 'display:flex;align-items:center;gap:8px;'});
       colorItem.appendChild(el('span', {textContent: 'Node Color:'}));
       const colorPick = el('input', {type: 'color', value: STATE.nodeColors[target.id()] || STATE.nodeColor, style: 'width:28px;height:20px;padding:0;border:1px solid var(--border);cursor:pointer;'});
-      colorPick.addEventListener('input', e => {
+            colorPick.addEventListener('input', e => {
         STATE.nodeColors[target.id()] = e.target.value;
         target.data('hasCustomColor', true);
         target.data('customColor', e.target.value);
@@ -2958,6 +2961,7 @@ if (type === 'node') {
           const n = cy.getElementById(target.id());
           if (n.length) { n.data('hasCustomColor', true); n.data('customColor', e.target.value); }
         });
+        if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
       });
       colorPick.addEventListener('click', e => e.stopPropagation());
       colorItem.appendChild(colorPick);
@@ -2969,9 +2973,10 @@ if (type === 'node') {
         target.data('customColor', '');
         [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
           const n = cy.getElementById(target.id());
-          if (n.length) { n.data('hasCustomColor', false); n.data('customColor', ''); }
+                    if (n.length) { n.data('hasCustomColor', false); n.data('customColor', ''); }
         });
         updateGraphStyles();
+        if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
       });
       colorItem.appendChild(colorReset);
       menu.appendChild(colorItem);                                                  
@@ -3125,6 +3130,29 @@ function tlGenerateTicks(minTs, maxTs, mode, timeW) {
   return ticks;
 }
 
+/* Stable color per originating entity. Computed from ALL transactions (not the
+   filtered set) so colors don't reshuffle when filters change. Honors any
+   per-entity color the user set on the detail chart. */
+const TL_SOURCE_PALETTE = [
+  '#3fb950','#58a6ff','#d29922','#bc8cff','#f778ba',
+  '#2ea043','#79c0ff','#e3b341','#a371f7','#ff7b72'
+];
+function tlSourceColorMap() {
+  const outCount = new Map();
+  STATE.transactions.forEach(t => outCount.set(t.from, (outCount.get(t.from) || 0) + 1));
+  const ranked = Array.from(outCount.entries()).sort((a, b) =>
+    b[1] - a[1] || a[0].localeCompare(b[0])
+  );
+    const map = new Map();
+  ranked.forEach(([ent], i) => {
+    if (STATE.timelineSourceColors[ent]) map.set(ent, STATE.timelineSourceColors[ent]);
+    else if (STATE.nodeColors[ent]) map.set(ent, STATE.nodeColors[ent]);
+    else if (i < TL_SOURCE_PALETTE.length) map.set(ent, TL_SOURCE_PALETTE[i]);
+    else map.set(ent, '#6e7681');
+  });
+  return map;
+}
+
 /* Resolve one transaction to the graph elements that represent it */
 function tlElementsFor(cy, t) {
   let coll = cy.collection();
@@ -3220,7 +3248,8 @@ function renderTimeline(txns) {
     const t = logMax > logMin ? (Math.log1p(amt) - logMin) / (logMax - logMin) : 0.5;
     return 1 + t * 5;
   }
-  const useDir = STATE.useDirectionColors && STATE.mainEntity;
+    let useDir = STATE.useDirectionColors && STATE.mainEntity;
+  let srcColors = tlSourceColorMap();
 
   /* ================= controls ================= */
   const ctrlBar = el('div', {className: 'tl-controls'});
@@ -3249,6 +3278,20 @@ function renderTimeline(txns) {
   zoomOut.addEventListener('click', () => setZoom((STATE.timelineZoom || 1) / 1.5));
   zoomIn.addEventListener('click',  () => setZoom((STATE.timelineZoom || 1) * 1.5));
   zoomFit.addEventListener('click', () => setZoom(1));
+
+    // --- line color mode ---
+  const lineModeSel = el('select', {title: 'Arrow color'});
+  [['match','Arrows: match chart'],['source','Arrows: by sender']].forEach(([v, lbl]) => {
+    lineModeSel.appendChild(el('option', {value: v, textContent: lbl,
+      ...(v === STATE.timelineLineMode ? {selected:'selected'} : {})}));
+  });
+  lineModeSel.addEventListener('change', () => {
+    STATE.timelineLineMode = lineModeSel.value;
+    srcColors = tlSourceColorMap();
+    buildLegend();
+    rebuildContent();
+  });
+  ctrlBar.appendChild(lineModeSel);
 
   // --- axis settings popover ---
   const axisBtn = el('button', {textContent: '📅 Axis ▾', title: 'Date axis settings'});
@@ -3306,8 +3349,51 @@ function renderTimeline(txns) {
   speedSel.value = '600';
   const replayBtn = el('button', {textContent: '↺ Replay', style: 'display:none'});
   const stepLabel = el('span', {className: 'tl-step'});
-  ctrlBar.appendChild(playBtn); ctrlBar.appendChild(speedSel);
-  ctrlBar.appendChild(replayBtn); ctrlBar.appendChild(stepLabel);
+    ctrlBar.appendChild(playBtn); ctrlBar.appendChild(speedSel);
+  ctrlBar.appendChild(replayBtn);
+
+  const legend = el('span', {style:'display:flex;align-items:center;gap:10px;margin-left:14px;font-size:10px;color:var(--text-muted);flex-shrink:0;'});
+  function buildLegend() {
+    legend.innerHTML = '';
+    if (STATE.timelineLineMode !== 'source') {
+      legend.textContent = 'Dot = entity · Arrow = flow';
+      return;
+    }
+    const senders = Array.from(new Set(dated.map(t => t.from))).sort();
+    senders.slice(0, 8).forEach(ent => {
+      const item = el('span', {style:'display:inline-flex;align-items:center;gap:4px;white-space:nowrap;'});
+      const swatch = el('span', {
+        title: `Click to set arrow color for ${ent}`,
+        style:`width:14px;height:0;border-top:2.5px solid ${srcColors.get(ent) || STATE.edgeColor};display:inline-block;cursor:pointer;`
+      });
+      const inp = el('input', {type:'color', value: srcColors.get(ent) || STATE.edgeColor,
+        style:'position:absolute;opacity:0;width:0;height:0;pointer-events:none;'});
+      swatch.addEventListener('click', e => { e.stopPropagation(); inp.click(); });
+      inp.addEventListener('input', e => {
+        STATE.timelineSourceColors[ent] = e.target.value;
+        srcColors = tlSourceColorMap();
+        swatch.style.borderTopColor = e.target.value;
+        rebuildContent();
+      });
+      swatch.addEventListener('contextmenu', e => {
+        e.preventDefault(); e.stopPropagation();
+        delete STATE.timelineSourceColors[ent];
+        srcColors = tlSourceColorMap();
+        buildLegend(); rebuildContent();
+      });
+      swatch.appendChild(inp);
+      item.appendChild(swatch);
+      item.appendChild(el('span', {
+        textContent: ent.length > 18 ? ent.slice(0, 17) + '…' : ent,
+        title: ent,
+        style: STATE.timelineSourceColors[ent] ? 'text-decoration:underline dotted;' : ''
+      }));
+      legend.appendChild(item);
+    });
+    if (senders.length > 8) legend.appendChild(el('span', {textContent: `+${senders.length - 8} more`, style:'opacity:0.7'}));
+  }
+  ctrlBar.appendChild(legend);
+  ctrlBar.appendChild(stepLabel);
   container.appendChild(ctrlBar);
 
   /* ================= body ================= */
@@ -3432,8 +3518,11 @@ function renderTimeline(txns) {
         return (count % 3 - 1) * Math.min(10, ROW_H * 0.2);
       }
 
-      let lineColor, lineOpacity;
-      if (useDir) {
+            let lineColor, lineOpacity;
+      if (STATE.timelineLineMode === 'source') {
+        lineColor = srcColors.get(t.from) || STATE.edgeColor;
+        lineOpacity = 0.75;
+      } else if (useDir) {
         if (t.to === STATE.mainEntity) { lineColor = STATE.inColor; lineOpacity = 0.6; }
         else if (t.from === STATE.mainEntity) { lineColor = STATE.outColor; lineOpacity = 0.6; }
         else { lineColor = STATE.edgeColor; lineOpacity = 0.2; }
@@ -3487,15 +3576,19 @@ function renderTimeline(txns) {
     });
   }
 
-    function rebuildAll() {
+      function rebuildAll() {
     plotW = Math.round((baseW - PAD_X * 2) * (STATE.timelineZoom || 1));
     timeW = plotW + PAD_X * 2;
+    useDir = STATE.useDirectionColors && STATE.mainEntity;
+    srcColors = tlSourceColorMap();
+    buildLegend();
     buildHeader();
     rebuildContent();
   }
   STATE._tlRefresh = rebuildAll;
 
   zoomLbl.textContent = Math.round((STATE.timelineZoom || 1) * 100) + '%';
+  buildLegend();
   rebuildAll();
 
   /* ================= graph sync ================= */
