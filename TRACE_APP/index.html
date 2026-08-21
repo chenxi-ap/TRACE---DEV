@@ -249,6 +249,10 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 #path-modal.active { display: flex; }
 .path-content { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; max-width: 400px; width: 90%; }
 
+#rename-modal { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9500;display:none;align-items:center;justify-content:center; }
+#rename-modal.active { display:flex; }
+.rename-content { background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;max-width:440px;width:90%; }
+
 /* Annotations */
 .annotation-box {
   position: absolute;
@@ -398,7 +402,8 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   selectedElements: new Set(),
   nodeIcons: {},        // entity -> uploaded image dataURL
   nodeShapes: {},
-  nodeColors: {},       // entity -> color hex
+   nodeColors: {},       // entity -> color hex
+  nodeLabels: {},       // entity -> display label override (visual only)
   labelPosition: 'bottom', // top | center | bottom
   roundNumbers: true,
   showTimeline: false,
@@ -747,6 +752,21 @@ function buildDOM() {
   <div id="summary-modal"><div class="summary-content"><div style="display:flex;justify-content:space-between;align-items:center;"><h3>Narrative Summary</h3><button class="icon-btn" id="summary-close">&times;</button></div><div class="summary-text" id="summary-text"></div><div class="wizard-nav" style="margin-top:16px"><button id="summary-copy">Copy to Clipboard</button></div></div></div>
   <div id="export-modal"><div class="export-content"><h3>Export to PDF</h3><div class="export-field"><label>Report Header</label><input id="exp-header" value="Transaction Intelligence Report"></div><div class="export-field"><label>Case Reference</label><input id="exp-case" placeholder="e.g. CASE-2024-0042"></div><div class="export-field"><label>Watermark Text</label><input id="exp-watermark" placeholder="e.g. CONFIDENTIAL"></div><div class="wizard-nav"><button id="exp-cancel">Cancel</button><button class="primary" id="exp-go">Export PDF</button></div></div></div>
 <div class="graph-tooltip" id="tooltip" style="display:none"></div>
+  <div id="rename-modal">
+    <div class="rename-content">
+      <h3 style="margin-bottom:4px;">Rename Entity</h3>
+      <p style="color:var(--text-secondary);font-size:12px;margin-bottom:16px;">Changes the label on charts only. The underlying transaction data is not modified.</p>
+      <label>Original Name</label>
+      <div id="rn-original" style="margin-top:4px;margin-bottom:14px;padding:7px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text-muted);word-break:break-word;"></div>
+      <label>Display Name</label>
+      <input id="rn-input" style="width:100%;margin-top:4px;" placeholder="Enter display name…">
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;">
+        <button id="rn-cancel">Cancel</button>
+        <button id="rn-restore" style="display:none">Restore Original</button>
+        <button class="primary" id="rn-save">Save</button>
+      </div>
+    </div>
+  </div>
   <div id="group-modal">
     <div class="group-content">
       <h3>&#9632; Create / Edit Group</h3>
@@ -1971,7 +1991,8 @@ function buildLeftSidebar() {
           STATE.nodeColor = DEFAULTS.nodeColor;                                                                                                                     
           STATE.nodeIcons = {};                                                                                                                                     
           STATE.nodeShapes = {};
-          STATE.nodeColors = {};                                                                                                                                    
+          STATE.nodeColors = {};
+          STATE.nodeLabels = {};                                                                                                                                    
           STATE.fontSize = DEFAULTS.fontSize;                                                                                                                       
           STATE.fontFamily = DEFAULTS.fontFamily;                                                                                                                   
           STATE.fontColor = DEFAULTS.fontColor;                                                                                                                     
@@ -2246,7 +2267,7 @@ function buildGraphElements(txns, mode) {
           }                                                                                                                                                         
           nodes.set(ent, {
             data: {
-              id: ent, label: ent, size: sz,
+              id: ent, label: displayName(ent), size: sz,
               txnCount: eData.txnCount,
               totalIn: eData.totalIn, totalOut: eData.totalOut,
               hasIcon: !!STATE.nodeIcons[ent],
@@ -2817,17 +2838,52 @@ function getActiveCy() {
 }
 
 
+function openRenameModal(entityId) {
+  const modal = $('#rename-modal');
+  const input = $('#rn-input');
+  const restoreBtn = $('#rn-restore');
+  const hasOverride = !!STATE.nodeLabels[entityId];
 
+  $('#rn-original').textContent = entityId;
+  input.value = STATE.nodeLabels[entityId] || entityId;
+  restoreBtn.style.display = hasOverride ? '' : 'none';
+
+  function close() { modal.classList.remove('active'); }
+
+  function save() {
+    const trimmed = input.value.trim();
+    if (!trimmed || trimmed === entityId) delete STATE.nodeLabels[entityId];
+    else STATE.nodeLabels[entityId] = trimmed;
+    close();
+    renderGraphs();
+  }
+
+  $('#rn-save').onclick = save;
+  $('#rn-cancel').onclick = close;
+  restoreBtn.onclick = () => { delete STATE.nodeLabels[entityId]; close(); renderGraphs(); };
+  modal.onclick = e => { if (e.target === modal) close(); };
+  input.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') save();
+    else if (e.key === 'Escape') close();
+  };
+
+  modal.classList.add('active');
+  setTimeout(() => { input.focus(); input.select(); }, 30);
+}
 /* ==========================================================================
    EDGE DETAIL PANEL
    ========================================================================== */
+function displayName(ent) {
+  return STATE.nodeLabels[ent] || ent;
+}
+
 function resolveDisplayName(id) {
-  if (!id.startsWith('__group__')) return id;
+  if (!id.startsWith('__group__')) return displayName(id);
   const groupId = id.replace('__group__', '');
   const g = STATE.groups.get(groupId);
   return g ? g.name : id;
 }
-
 function showEdgeDetail(data, mode) {
   const panel = $('#detail-panel');
   const body = $('#detail-body');
@@ -2988,7 +3044,18 @@ if (type === 'node') {
         if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
       });
       colorItem.appendChild(colorReset);
-      menu.appendChild(colorItem);                                                  
+      menu.appendChild(colorItem);  
+
+      // Rename (display only)
+      if (!target.data('isGroup')) {
+        const isRenamed = !!STATE.nodeLabels[target.id()];
+        menu.appendChild(el('div', {
+          className: 'context-menu-item',
+          innerHTML: isRenamed ? '&#9998; Edit display name…' : '&#9998; Rename (display only)…',
+                    onClick: () => { hideContextMenu(); openRenameModal(target.id()); }
+        }));
+      }
+
       // Upload icon for this specific entity                                                                                                                       
       menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Upload Icon...', onClick: () => {
         hideContextMenu();                                                                                                                                          
@@ -3021,12 +3088,13 @@ if (type === 'node') {
       }                                                                                                                                                             
                                                                                                                                                                     
       // Reset this entity to defaults (only if it has overrides)                                                                                                   
-      if (STATE.nodeShapes[target.id()] || STATE.nodeIcons[target.id()] || STATE.nodeColors[target.id()]) {
+      if (STATE.nodeShapes[target.id()] || STATE.nodeIcons[target.id()] || STATE.nodeColors[target.id()] || STATE.nodeLabels[target.id()]) {
         menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Reset Entity to Default', onClick: () => {                                        
           hideContextMenu();                                                                                                                                        
           delete STATE.nodeShapes[target.id()];                                                                                                                     
           delete STATE.nodeIcons[target.id()];
-          delete STATE.nodeColors[target.id()];                                                                                                                     
+          delete STATE.nodeColors[target.id()];
+          delete STATE.nodeLabels[target.id()];                                                                                                                 
           renderGraphs();                                                                                                                                           
         }}));                                                                                                                                                       
       }                                                                                                                                                             
@@ -3240,7 +3308,7 @@ function renderTimeline(txns) {
   const panelRect = panel.getBoundingClientRect();
   const availH = Math.max(80, panelRect.height - 40 /*controls*/ - 30 /*header*/ - 6 /*resizer*/);
   const ROW_H = Math.max(26, Math.min(110, Math.floor(availH / Math.max(entities.length, 1))));
-    const DOT_R = Math.max(3.5, Math.min(7, ROW_H / 8)) * (STATE.timelineDotScale || 1);
+  let DOT_R = Math.max(3.5, Math.min(7, ROW_H / 8)) * (STATE.timelineDotScale || 1);
   const PAD_X = 30;
   const baseW = Math.max((panelRect.width || 900) - LABEL_W - 24, 480);
   let plotW = Math.round((baseW - PAD_X * 2) * (STATE.timelineZoom || 1));
@@ -3334,11 +3402,12 @@ function renderTimeline(txns) {
     <div class="tl-axis-row"><label>Line width</label>
       <input type="range" id="tl-line-scale" min="0.3" max="4" step="0.1" value="${STATE.timelineLineScale}"><span id="tl-line-val" style="font-size:10px;color:var(--text-muted);width:22px">${STATE.timelineLineScale}×</span></div>
     <div class="tl-axis-row"><label>Arrow size</label>
-      <input type="range" id="tl-arrow-size" min="0" max="20" step="1" value="${STATE.timelineArrowSize}"><span id="tl-arrow-val" style="font-size:10px;color:var(--text-muted);width:22px">${STATE.timelineArrowSize}</span></div>`;
+      <input type="range" id="tl-arrow-size" min="0" max="20" step="1" value="${STATE.timelineArrowSize}"><span id="tl-arrow-val" style="font-size:10px;color:var(--text-muted);width:22px">${STATE.timelineArrowSize}</span></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:10px;"><button id="tl-ax-done" class="primary" style="padding:4px 14px;">Done</button></div>`;
   container.appendChild(pop);
   axisBtn.addEventListener('click', e => { e.stopPropagation(); pop.classList.toggle('open'); });
   pop.addEventListener('click', e => e.stopPropagation());
-  document.addEventListener('click', () => pop.classList.remove('open'));
+  $('#tl-ax-done', pop).addEventListener('click', () => pop.classList.remove('open'));
 
   $('#tl-ax-mode', pop).value = STATE.timelineAxisMode;
   $('#tl-ax-family', pop).value = f.family;
@@ -3362,10 +3431,10 @@ function renderTimeline(txns) {
     $('#tl-dot-val', pop).textContent   = STATE.timelineDotScale + '×';
     $('#tl-line-val', pop).textContent  = STATE.timelineLineScale + '×';
     $('#tl-arrow-val', pop).textContent = STATE.timelineArrowSize;
-    renderTimeline(txns);
+    rebuildContent();
   }
   $$('#tl-dot-scale, #tl-line-scale, #tl-arrow-size', pop)
-    .forEach(inp => inp.addEventListener('change', readSizes));
+    .forEach(inp => { inp.addEventListener('input', readSizes); inp.addEventListener('change', readSizes); });
   $$('#tl-ax-mode, #tl-ax-family, #tl-ax-size, #tl-ax-color, #tl-ax-bold, #tl-ax-italic', pop)
     .forEach(inp => { inp.addEventListener('input', readAxis); inp.addEventListener('change', readAxis); });
 
@@ -3413,8 +3482,8 @@ function renderTimeline(txns) {
       swatch.appendChild(inp);
       item.appendChild(swatch);
       item.appendChild(el('span', {
-        textContent: ent.length > 18 ? ent.slice(0, 17) + '…' : ent,
-        title: ent,
+        textContent: (dn => dn.length > 18 ? dn.slice(0, 17) + '…' : dn)(displayName(ent)),
+        title: displayName(ent),
         style: STATE.timelineSourceColors[ent] ? 'text-decoration:underline dotted;' : ''
       }));
       legend.appendChild(item);
@@ -3469,7 +3538,7 @@ function renderTimeline(txns) {
       } else {
         row.appendChild(el('span', {style: `width:9px;height:9px;border-radius:50%;background:${entityColor};flex-shrink:0;border:1px solid rgba(255,255,255,0.12);`}));
       }
-      row.appendChild(el('span', {style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;', textContent: entity}));
+      row.appendChild(el('span', {style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;', textContent: displayName(entity)}));
 
       row.addEventListener('click', () => {
         const cy = getActiveCy(); if (!cy) return;
@@ -3616,6 +3685,7 @@ function renderTimeline(txns) {
   function rebuildAll() {
     plotW = Math.round((baseW - PAD_X * 2) * (STATE.timelineZoom || 1));
     timeW = plotW + PAD_X * 2;
+    DOT_R = Math.max(3.5, Math.min(7, ROW_H / 8)) * (STATE.timelineDotScale || 1);
     useDir = STATE.useDirectionColors && STATE.mainEntity;
     srcColors = tlSourceColorMap();
     buildLegend();
@@ -3963,6 +4033,7 @@ bindTimelineResizer();
       hideDetailPanel();
       $('#summary-modal').classList.remove('active');
       $('#export-modal').classList.remove('active');
+      $('#rename-modal').classList.remove('active');
       const cy = getActiveCy();
       if (cy) cy.elements().removeClass('highlighted dimmed tl-dimmed anomaly-highlight path-highlight tl-current tl-played');
     }
