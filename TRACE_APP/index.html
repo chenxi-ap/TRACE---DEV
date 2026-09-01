@@ -251,6 +251,8 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 
 #rename-modal { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9500;display:none;align-items:center;justify-content:center; }
 #rename-modal.active { display:flex; }
+#edge-label-modal { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9500;display:none;align-items:center;justify-content:center; }
+#edge-label-modal.active { display:flex; }
 .rename-content { background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;max-width:440px;width:90%; }
 
 /* Annotations */
@@ -404,6 +406,9 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   nodeShapes: {},
    nodeColors: {},       // entity -> color hex
   nodeLabels: {},       // entity -> display label override (visual only)
+  edgeColors: {},       // edge id -> color override
+  edgeLabels: {},       // edge id -> custom label text (display only)
+  linkLabel: { showAmount: true, showCount: true, showDesc: false, descPosition: 'after', descStyle: 'none' },
   labelPosition: 'bottom', // top | center | bottom
   roundNumbers: true,
   showTimeline: false,
@@ -468,7 +473,8 @@ const DEFAULTS = {
     inColor: '#3fb950', outColor: '#f85149',                                                                                                                        
     fontSize: 12, labelPosition: 'bottom', showLegend: true, 
     fontFamily: 'sans-serif', fontColor: '#e6edf3', fontBold: false, fontItalic: false,                                                                               
-    edgeFontSize: 10, edgeFontColor: '#8b949e', edgeFontBold: false, edgeFontItalic: false,                                                                                                       
+    edgeFontSize: 10, edgeFontColor: '#8b949e', edgeFontBold: false, edgeFontItalic: false,
+    linkLabel: { showAmount: true, showCount: true, showDesc: false, descPosition: 'after', descStyle: 'none' },
   };
 
 /* ==========================================================================
@@ -764,6 +770,21 @@ function buildDOM() {
         <button id="rn-cancel">Cancel</button>
         <button id="rn-restore" style="display:none">Restore Original</button>
         <button class="primary" id="rn-save">Save</button>
+      </div>
+    </div>
+  </div>
+  <div id="edge-label-modal">
+    <div class="rename-content">
+      <h3 style="margin-bottom:4px;">Edit Link Label</h3>
+      <p style="color:var(--text-secondary);font-size:12px;margin-bottom:16px;">Display only — the underlying transaction data is not modified. Press Enter for a new line.</p>
+      <label>Auto Label</label>
+      <div id="el-auto" style="margin-top:4px;margin-bottom:14px;padding:7px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text-muted);white-space:pre-wrap;word-break:break-word;"></div>
+      <label>Display Label</label>
+      <textarea id="el-input" rows="3" style="width:100%;margin-top:4px;resize:vertical;" placeholder="Leave blank for no label…"></textarea>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;">
+        <button id="el-cancel">Cancel</button>
+        <button id="el-restore" style="display:none">Restore Auto</button>
+        <button class="primary" id="el-save">Save</button>
       </div>
     </div>
   </div>
@@ -1563,16 +1584,7 @@ function buildTopbar() {
   
   $('#chk-round').addEventListener('change', e => {
     STATE.roundNumbers = e.target.checked;
-    [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
-      cy.edges().forEach(edge => {
-        const d = edge.data();
-        if (d.count != null) {
-          edge.data('label', `${formatAmount(d.amount)} (${d.count})`);
-        } else if (d.amount != null) {
-          edge.data('label', formatAmount(Math.abs(d.amount)));
-        }
-      });
-    });
+    refreshEdgeLabels();
   });
   $('#btn-summary').addEventListener('click', showSummary);
   $('#btn-export').addEventListener('click', () => $('#export-modal').classList.add('active'));
@@ -1853,11 +1865,11 @@ function buildLeftSidebar() {
                 </select>                                                                                                                                           
               </div>                                                                                                                                                
               <div class="sidebar-row"><label>Font Color</label><input type="color" id="s-font-color" value="#e6edf3" class="color-input"></div>                    
-              <div class="sidebar-row"><label>Style</label>                                                                                                         
-                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-font-bold"> Bold</label>                              
-                <label style="font-size:11px;text-transform:none;cursor:pointer;margin-left:8px"><input type="checkbox" id="s-font-italic"> Italic</label>          
-              </div>                                                                                                                                                
-            </div>                                                                                                                                                  
+                            <div class="sidebar-row"><label>Style</label>
+                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-font-bold"> Bold</label>
+                <label style="font-size:11px;text-transform:none;cursor:pointer;margin-left:8px"><input type="checkbox" id="s-font-italic"> Italic</label>
+              </div>
+            </div>                                                                                                                                                
           </div>                                                                                                                                                    
           <div class="sidebar-section">                                                                                                                             
             <div class="sidebar-header" data-section="edge-style">Link Style <button class="sm" id="reset-edge-style" style="margin-left:auto;margin-right:8px;"    
@@ -1886,14 +1898,41 @@ function buildLeftSidebar() {
               <div class="sidebar-row"><label>Link Label Font</label><input type="range" id="s-edge-font-size" min="6" max="20" value="10" style="flex:1"><span     
   id="s-edge-font-val">10</span></div>                                                                                                                              
               <div class="sidebar-row"><label>Link Label Color</label><input type="color" id="s-edge-font-color" value="#8b949e" class="color-input"></div>         
-              <div class="sidebar-row"><label>Style</label>                                                                                                         
-                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-edge-font-bold"> Bold</label>                         
-                <label style="font-size:11px;text-transform:none;cursor:pointer;margin-left:8px"><input type="checkbox" id="s-edge-font-italic"> Italic</label>     
-              </div>                                                                                                                                                
-            </div>                                                                                                                                                  
-          </div>                                                                                                                                                    
-          <div class="sidebar-section">                                                                                                                             
-            <div class="sidebar-header" data-section="layout">Layout <span class="chevron">&#9662;</span></div>                                                     
+                           <div class="sidebar-row"><label>Style</label>
+                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-edge-font-bold"> Bold</label>
+                <label style="font-size:11px;text-transform:none;cursor:pointer;margin-left:8px"><input type="checkbox" id="s-edge-font-italic"> Italic</label>
+              </div>
+              <div style="height:1px;background:var(--border);margin:6px 0"></div>
+              <div style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Link Label Content</div>
+              <div class="sidebar-row">
+                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-lbl-amount" checked> Amount</label>
+                <label style="font-size:11px;text-transform:none;cursor:pointer;margin-left:8px" title="Summary view only"><input type="checkbox" id="s-lbl-count" checked> Txn count</label>
+              </div>
+              <div class="sidebar-row" id="lbl-desc-row">
+                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-lbl-desc"> Description</label>
+              </div>
+               <div id="lbl-desc-opts" style="display:none">
+                <div class="sidebar-row"><label>Description Position</label>
+                  <select id="s-lbl-desc-pos">
+                    <option value="after">After amount</option>
+                    <option value="before">Before amount</option>
+                    <option value="below">New line, above link</option>
+                    <option value="under">Under the link line</option>
+                  </select>
+                </div>
+                <div class="sidebar-row"><label>Description Wrapper</label>
+                  <select id="s-lbl-desc-style">
+                    <option value="none">None</option>
+                    <option value="paren">Parentheses ( )</option>
+                    <option value="dash">Dash -</option>
+                  </select>
+                </div>
+              </div>
+              <div style="font-size:10px;color:var(--text-muted)">Right-click any link to set its own color or edit its label text.</div>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-header" data-section="layout">Layout <span class="chevron">&#9662;</span></div>                                              
             <div class="sidebar-body" data-section="layout">                                                                                                        
               <div class="sidebar-row"><label>Legend</label>                                                                                                        
                 <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-legend" checked> Show</label>                         
@@ -1905,7 +1944,14 @@ function buildLeftSidebar() {
             </div>                                                                                                                                                  
           </div>                                                                                                                                                    
         `;                                                                                                                                                          
-                                                                                                                                                                    
+                if (!STATE.mapping.desc) $('#lbl-desc-row').style.display = 'none';
+        $('#s-lbl-amount').checked = STATE.linkLabel.showAmount;
+        $('#s-lbl-count').checked = STATE.linkLabel.showCount;
+        $('#s-lbl-desc').checked = STATE.linkLabel.showDesc;
+        $('#s-lbl-desc-pos').value = STATE.linkLabel.descPosition;
+        $('#s-lbl-desc-style').value = STATE.linkLabel.descStyle;
+        $('#lbl-desc-opts').style.display = STATE.linkLabel.showDesc ? '' : 'none';
+
         $$('.sidebar-header', sb).forEach(h => {                                                                                                                    
           h.addEventListener('click', e => {                                                                                                                        
             if (e.target.tagName === 'BUTTON') return;                                                                                                              
@@ -1917,8 +1963,9 @@ function buildLeftSidebar() {
           });                                                                                                                                                       
         });                                                                                                                                                         
                                                                                                                                                                     
-        const apply = debounce(() => {                                                                                                                              
-          STATE.nodeShape = $('#s-node-shape').value;                                                                                                               
+        const apply = debounce(() => {
+          try {
+          STATE.nodeShape = $('#s-node-shape').value;                                                                                                             
           STATE.nodeSize = $('#s-node-scaled').checked ? 'scaled' : parseInt($('#s-node-size-range').value);                                                        
           STATE.nodeColor = $('#s-node-color').value;                                                                                                               
           STATE.edgeColor = $('#s-edge-color').value;                                                                                                               
@@ -1959,9 +2006,17 @@ function buildLeftSidebar() {
             document.querySelectorAll('.cy-canvas').forEach(c => c.style.background = STATE.bgColor);
           }
 
-          updateGraphStyles();    
-          if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();                                                                                                                                                    
-        }, 200);                                                                                                                                                    
+          STATE.linkLabel.showAmount   = $('#s-lbl-amount').checked;
+          STATE.linkLabel.showCount    = $('#s-lbl-count').checked;
+          STATE.linkLabel.showDesc     = $('#s-lbl-desc').checked;
+          STATE.linkLabel.descPosition = $('#s-lbl-desc-pos').value;
+          STATE.linkLabel.descStyle    = $('#s-lbl-desc-style').value;
+          $('#lbl-desc-opts').style.display = STATE.linkLabel.showDesc ? '' : 'none';
+
+          updateGraphStyles();
+          if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
+          } catch (err) { console.error('Sidebar apply failed:', err); }
+        }, 200);                                                                                                                                                  
                                                                                                                                                                     
         $$('#left-sidebar select, #left-sidebar input').forEach(el => {                                                                                             
           el.addEventListener('input', apply);                                                                                                                      
@@ -2024,7 +2079,16 @@ function buildLeftSidebar() {
 
         $('#reset-edge-style').addEventListener('click', e => {                                                                                                     
           e.stopPropagation();             
-          STATE.timelineSourceColors = {};                                                                                                                       
+          STATE.timelineSourceColors = {};
+          STATE.edgeColors = {};
+          STATE.edgeLabels = {};
+          STATE.linkLabel = {...DEFAULTS.linkLabel};
+          $('#s-lbl-amount').checked = true;
+          $('#s-lbl-count').checked = true;
+          $('#s-lbl-desc').checked = false;
+          $('#s-lbl-desc-pos').value = 'after';
+          $('#s-lbl-desc-style').value = 'none';
+          $('#lbl-desc-opts').style.display = 'none';                                                                                                                     
           STATE.edgeColor = DEFAULTS.edgeColor;                                                                                                                     
           STATE.showArrows = DEFAULTS.showArrows;                                                                                                                   
           STATE.arrowSize = DEFAULTS.arrowSize;                                                                                                                     
@@ -2280,23 +2344,25 @@ function buildGraphElements(txns, mode) {
           });                                                                                                                                                       
         }                                                                                                                                                           
       });                                                                                                                                                           
-      if (mode === 'detail') {                                                                                                                                      
-        let color = STATE.edgeColor;                                                                                                                                
-        if (STATE.useDirectionColors && STATE.mainEntity) {                                                                                                         
-          if (t.to === STATE.mainEntity) color = STATE.inColor;                                                                                                     
-          else if (t.from === STATE.mainEntity) color = STATE.outColor;                                                                                             
-        }                                                                                                                                                           
-        edges.push({                                                                                                                                                
-          data: {                                                                                                                                                   
-            id: `e${t.id}`, source: t.from, target: t.to,                                                                                                         
-            label: t.amount != null ? formatAmount(Math.abs(t.amount)) : '',                                                                                        
-            amount: t.amount, date: t.date ? t.date.toLocaleDateString() : '',                                                                                      
-            desc: t.desc, type: t.type,                                                                                                                             
-            thickness: STATE.edgeThicknessScale ? 2 : STATE.uniformEdgeWidth,                                                                                       
-            color, txnId: t.id, arrowScale: arrowScale                                                                                                              
-          }                                                                                                                                                         
-        });                                                                                                                                                         
-      }                                                                                                                                                             
+      if (mode === 'detail') {
+        const eid = `e${t.id}`;
+        let color = STATE.edgeColor;
+        if (STATE.useDirectionColors && STATE.mainEntity) {
+          if (t.to === STATE.mainEntity) color = STATE.inColor;
+          else if (t.from === STATE.mainEntity) color = STATE.outColor;
+        }
+        if (STATE.edgeColors[eid]) color = STATE.edgeColors[eid];
+        edges.push({
+          data: {
+            id: eid, source: t.from, target: t.to,
+            label: buildLinkLabel({id: eid, amount: t.amount, desc: t.desc}),
+            amount: t.amount, date: t.date ? t.date.toLocaleDateString() : '',
+            desc: t.desc, type: t.type,
+            thickness: STATE.edgeThicknessScale ? 2 : STATE.uniformEdgeWidth,
+            color, txnId: t.id, arrowScale: arrowScale
+          }
+        });
+      }                                                                                                                                                           
     });                                                                                                                                                             
    
     if (mode === 'summary') {                                                                                                                                       
@@ -2309,21 +2375,24 @@ function buildGraphElements(txns, mode) {
         if (t.amount != null) p.total += Math.abs(t.amount);                                                                                                        
         p.txns.push(t);                                                                                                                                             
       });                                                                                                                                                           
-      pairs.forEach((p, key) => {                                                                                                                                   
-        let color = STATE.edgeColor;                                                                                                                                
-        if (STATE.useDirectionColors && STATE.mainEntity) {                                                                                                         
-          if (p.to === STATE.mainEntity) color = STATE.inColor;                                                                                                     
-          else if (p.from === STATE.mainEntity) color = STATE.outColor;                                                                                             
-        }                                                                                                                                                           
-        edges.push({                                                                                                                                                
-          data: {                                                                                                                                                   
-            id: `s_${key}`, source: p.from, target: p.to,                                                                                                           
-            label: `${formatAmount(p.total)} (${p.count})`,                                                                                                         
-            amount: p.total, count: p.count,                                                                                                                        
-            thickness: STATE.edgeThicknessScale ? 2 : STATE.uniformEdgeWidth,                                                                                       
-            color, arrowScale: arrowScale, txns: p.txns                                                                                                             
-          }                                                                                                                                                         
-        });                                                                                                                                                         
+      pairs.forEach((p, key) => {
+        const eid = `s_${key}`;
+        let color = STATE.edgeColor;
+        if (STATE.useDirectionColors && STATE.mainEntity) {
+          if (p.to === STATE.mainEntity) color = STATE.inColor;
+          else if (p.from === STATE.mainEntity) color = STATE.outColor;
+        }
+        if (STATE.edgeColors[eid]) color = STATE.edgeColors[eid];
+        const descAgg = [...new Set(p.txns.map(x => (x.desc || '').trim()).filter(Boolean))].slice(0, 3).join('; ');
+        edges.push({
+          data: {
+            id: eid, source: p.from, target: p.to,
+            label: buildLinkLabel({id: eid, amount: p.total, count: p.count, desc: descAgg, isSummary: true}),
+            amount: p.total, count: p.count, descAgg,
+            thickness: STATE.edgeThicknessScale ? 2 : STATE.uniformEdgeWidth,
+            color, arrowScale: arrowScale, txns: p.txns
+          }
+        });
       });                                                                                                                                                           
     }                                                                                                                                                               
                                                                                                                                                                     
@@ -2425,7 +2494,9 @@ function getCyStyle() {
         'text-outline-color': 'transparent',
         'text-outline-width': 0,
         'text-rotation': 'autorotate',
-        'text-margin-y': -10,
+        'text-margin-y': (STATE.linkLabel.showDesc && STATE.linkLabel.descPosition === 'under') ? 0 : -10,
+        'text-wrap': 'wrap',
+        'text-max-width': '260px',
       }
     },
     {
@@ -2782,14 +2853,15 @@ function updateGraphStyles() {
       cy.edges().forEach(edge => {                                                                                                                                      
     edge.data('arrowScale', arrowScale);                                                                                                                            
                                                                                                                                                                     
-    let color = STATE.edgeColor;                                                                                                                                    
-    if (STATE.useDirectionColors && STATE.mainEntity) {                                                                                                             
-      const src = edge.data('source');                                                                                                                              
-      const tgt = edge.data('target');                                                                                                                              
-      if (tgt === STATE.mainEntity) color = STATE.inColor;                                                                                                          
-      else if (src === STATE.mainEntity) color = STATE.outColor;                                                                                                    
-    }                                                                                                                                                               
-    edge.data('color', color);                                                                                                                                      
+    let color = STATE.edgeColor;
+    if (STATE.useDirectionColors && STATE.mainEntity) {
+      const src = edge.data('source');
+      const tgt = edge.data('target');
+      if (tgt === STATE.mainEntity) color = STATE.inColor;
+      else if (src === STATE.mainEntity) color = STATE.outColor;
+    }
+    if (STATE.edgeColors[edge.id()]) color = STATE.edgeColors[edge.id()];
+    edge.data('color', color);                                                                                                                                     
                                                                                                                                                                     
     if (STATE.edgeThicknessScale) {                                                                                                                                 
       const amt = edge.data('amount');                                                                                                                              
@@ -2803,8 +2875,9 @@ function updateGraphStyles() {
     }                                                                                                                                                               
   });                                                                                                                                                           
                                                                                                                                                                     
-      cy.style(getCyStyle());                                                                                                                                       
-    });                                                                                                                                                             
+      cy.style(getCyStyle());
+    });
+    refreshEdgeLabels();
   }
  
 
@@ -2867,6 +2940,84 @@ function openRenameModal(entityId) {
     if (e.key === 'Enter') save();
     else if (e.key === 'Escape') close();
   };
+
+  modal.classList.add('active');
+  setTimeout(() => { input.focus(); input.select(); }, 30);
+}
+/* ==========================================================================
+   LINK LABEL BUILDER
+   ========================================================================== */
+function buildLinkLabel(o) {
+  // o = {id, amount, count, desc, isSummary}
+  if (o.id != null && STATE.edgeLabels[o.id] != null) return STATE.edgeLabels[o.id];
+  const L = STATE.linkLabel;
+  let main = '';
+  if (L.showAmount && o.amount != null) main = formatAmount(Math.abs(o.amount));
+  if (o.isSummary && L.showCount && o.count != null) {
+    main = main ? `${main} (${o.count})` : `${o.count} txns`;
+  }
+  const raw = (L.showDesc && o.desc) ? String(o.desc).trim() : '';
+  if (!raw) return main;
+  const d = L.descStyle === 'paren' ? `(${raw})` : raw;
+  const sep = L.descStyle === 'dash' ? ' - ' : ' ';
+  if (!main) return d;
+  if (L.descPosition === 'before') return d + sep + main;
+  if (L.descPosition === 'below' || L.descPosition === 'under') return main + '\n' + d;
+  return main + sep + d;
+}
+
+function edgeDescOf(d) { return d.descAgg != null ? d.descAgg : d.desc; }
+
+function refreshEdgeLabels() {
+  [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
+    cy.edges().forEach(e => {
+      const d = e.data();
+      e.data('label', buildLinkLabel({
+        id: d.id, amount: d.amount, count: d.count,
+        desc: edgeDescOf(d), isSummary: d.count != null
+      }));
+    });
+  });
+}
+
+function autoLabelForEdge(id) {
+  let d = null;
+  [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
+    const e = cy.getElementById(id);
+    if (e.length && !d) d = e.data();
+  });
+  if (!d) return '';
+  const saved = STATE.edgeLabels[id];
+  delete STATE.edgeLabels[id];
+  const lbl = buildLinkLabel({ id, amount: d.amount, count: d.count, desc: edgeDescOf(d), isSummary: d.count != null });
+  if (saved != null) STATE.edgeLabels[id] = saved;
+  return lbl;
+}
+
+function openEdgeLabelModal(edgeId) {
+  const modal = $('#edge-label-modal');
+  const input = $('#el-input');
+  const restoreBtn = $('#el-restore');
+  const auto = autoLabelForEdge(edgeId);
+  const hasOverride = STATE.edgeLabels[edgeId] != null;
+
+  $('#el-auto').textContent = auto || '(no label)';
+  input.value = hasOverride ? STATE.edgeLabels[edgeId] : auto;
+  restoreBtn.style.display = hasOverride ? '' : 'none';
+
+  function close() { modal.classList.remove('active'); }
+  function save() {
+    const v = input.value;
+    if (v === auto) delete STATE.edgeLabels[edgeId];
+    else STATE.edgeLabels[edgeId] = v;
+    close();
+    refreshEdgeLabels();
+  }
+  $('#el-save').onclick = save;
+  $('#el-cancel').onclick = close;
+  restoreBtn.onclick = () => { delete STATE.edgeLabels[edgeId]; close(); refreshEdgeLabels(); };
+  modal.onclick = e => { if (e.target === modal) close(); };
+  input.onkeydown = e => { e.stopPropagation(); if (e.key === 'Escape') close(); };
 
   modal.classList.add('active');
   setTimeout(() => { input.focus(); input.select(); }, 30);
@@ -3114,7 +3265,45 @@ if (type === 'node') {
       menu.appendChild(el('div', {className: 'context-menu-divider'}));                                                                                             
     }                                                                                                                                                               
                                                                                                                                                                     
-    // Delete selected                                                                                                                                              
+    if (type === 'edge') {
+      const eid = target.id();
+      const selEdges = cy.$('edge:selected');
+      const applyTo = selEdges.length > 1 ? selEdges.map(e => e.id()) : [eid];
+
+      const colorItem = el('div', {className: 'context-menu-item', style: 'display:flex;align-items:center;gap:8px;'});
+      colorItem.appendChild(el('span', {textContent: applyTo.length > 1 ? `Link Color (${applyTo.length}):` : 'Link Color:'}));
+      const ecp = el('input', {type: 'color', value: STATE.edgeColors[eid] || target.data('color') || STATE.edgeColor, style: 'width:28px;height:20px;padding:0;border:1px solid var(--border);cursor:pointer;'});
+      ecp.addEventListener('click', ev => ev.stopPropagation());
+      ecp.addEventListener('input', ev => {
+        const v = ev.target.value;
+        applyTo.forEach(id => {
+          STATE.edgeColors[id] = v;
+          [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(c => {
+            const ed = c.getElementById(id);
+            if (ed.length) ed.data('color', v);
+          });
+        });
+        if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
+      });
+      colorItem.appendChild(ecp);
+      const ecReset = el('span', {textContent: '↺', style: 'cursor:pointer;font-size:14px;color:var(--text-muted);', title: 'Reset link color'});
+      ecReset.addEventListener('click', ev => {
+        ev.stopPropagation();
+        applyTo.forEach(id => delete STATE.edgeColors[id]);
+        updateGraphStyles();
+        if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
+      });
+      colorItem.appendChild(ecReset);
+      menu.appendChild(colorItem);
+
+      menu.appendChild(el('div', {className: 'context-menu-item', innerHTML: '&#9998; Edit link label…', onClick: () => { hideContextMenu(); openEdgeLabelModal(eid); }}));
+      if (STATE.edgeLabels[eid] != null) {
+        menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Restore auto label', onClick: () => { hideContextMenu(); delete STATE.edgeLabels[eid]; refreshEdgeLabels(); }}));
+      }
+      menu.appendChild(el('div', {className: 'context-menu-divider'}));
+    }
+
+    // Delete selected
     const selCount = cy.$(':selected').length;
     if (selCount > 0 || type === 'node' || type === 'edge') {                                                                                                       
       menu.appendChild(el('div', {className: 'context-menu-item', innerHTML: `&#128465; Delete selected (${Math.max(selCount, 1)})`, onClick: () => {               
@@ -3626,6 +3815,10 @@ function renderTimeline(txns) {
         else if (t.from === STATE.mainEntity) { lineColor = STATE.outColor; lineOpacity = 0.6; }
         else { lineColor = STATE.edgeColor; lineOpacity = 0.2; }
       } else { lineColor = STATE.edgeColor; lineOpacity = 0.3; }
+      if (STATE.timelineLineMode !== 'source') {
+        const ovr = STATE.edgeColors[`e${t.id}`] || STATE.edgeColors[`s_${t.from}->${t.to}`];
+        if (ovr) { lineColor = ovr; lineOpacity = 0.75; }
+      }
 
       const lw = getLineWidth(t.amount);
       const line = document.createElementNS(svgNS, 'line');
@@ -4034,6 +4227,7 @@ bindTimelineResizer();
       $('#summary-modal').classList.remove('active');
       $('#export-modal').classList.remove('active');
       $('#rename-modal').classList.remove('active');
+      $('#edge-label-modal').classList.remove('active');
       const cy = getActiveCy();
       if (cy) cy.elements().removeClass('highlighted dimmed tl-dimmed anomaly-highlight path-highlight tl-current tl-played');
     }
@@ -4241,7 +4435,9 @@ function applyGroupsToElements(nodes, edges) {
     } else { filteredEdges.push(e); }
   });
   mergedEdgeMap.forEach(m => {
-    m.label = `${formatAmount(m.amount)} (${m.count})`;
+    m.descAgg = [...new Set((m.txns || []).map(x => (x.desc || '').trim()).filter(Boolean))].slice(0, 3).join('; ');
+    if (STATE.edgeColors[m.id]) m.color = STATE.edgeColors[m.id];
+    m.label = buildLinkLabel({id: m.id, amount: m.amount, count: m.count, desc: m.descAgg, isSummary: true});
     if (STATE.edgeThicknessScale) { const allAmts = [...filteredEdges.map(e => Math.abs(e.data.amount||0)), ...Array.from(mergedEdgeMap.values()).map(e => e.amount)]; const maxA = Math.max(...allAmts, 1); m.thickness = 1 + (m.amount / maxA) * 8; }
   });
   return {nodes: [...filteredNodes, ...groupNodes], edges: [...filteredEdges, ...Array.from(mergedEdgeMap.values()).map(m => ({data: m}))]};
