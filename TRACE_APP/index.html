@@ -417,6 +417,14 @@ dataShape: 'fromto', // 'fromto' | 'entity'
    nodeColors: {},       // entity -> color hex
   nodeLabels: {},       // entity -> display label override (visual only)
   edgeColors: {},       // edge id -> color override
+  nodeSizes: {},        // entity -> absolute size override
+  edgeWidths: {},       // edge id -> absolute width override
+  nodeScaleMode: 'uniform',   // uniform | amount | count
+  nodeScaleLog: true,
+  nodeSizeMult: 1,
+  edgeScaleMode: 'amount',    // uniform | amount | count
+  edgeScaleLog: true,
+  edgeSizeMult: 1,
   edgeLabels: {},       // edge id -> custom label text (display only)
   linkLabel: { showAmount: true, showCount: true, showDesc: false, descPosition: 'after', descStyle: 'none' },
   labelPosition: 'bottom', // top | center | bottom
@@ -492,6 +500,8 @@ const DEFAULTS = {
     fontFamily: 'sans-serif', fontColor: '#e6edf3', fontBold: false, fontItalic: false,                                                                               
     edgeFontSize: 10, edgeFontColor: '#8b949e', edgeFontBold: false, edgeFontItalic: false,
     linkLabel: { showAmount: true, showCount: true, showDesc: false, descPosition: 'after', descStyle: 'none' },
+    nodeScaleMode: 'uniform', nodeScaleLog: true, nodeSizeMult: 1,
+    edgeScaleMode: 'amount', edgeScaleLog: true, edgeSizeMult: 1,
   };
 
 /* ==========================================================================
@@ -1882,11 +1892,21 @@ function buildLeftSidebar() {
                   <option value="diamond">Diamond</option><option value="triangle">Triangle</option>                                                                
                 </select>                                                                                                                                           
               </div>                                                                                                                                                
-              <div class="sidebar-row"><label>Size</label>                                                                                                          
-                <input type="range" id="s-node-size-range" min="20" max="80" value="45" style="flex:1"><span id="s-node-size-val">45</span>                         
-              </div>                                                                                                                                                
-              <div class="sidebar-row"><label>Scale to Vol.</label>                                                                                                 
-                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-node-scaled"> Enable</label>                          
+              <div class="sidebar-row"><label>Sizing</label>
+                <select id="s-node-scale-mode">
+                  <option value="uniform">Uniform</option>
+                  <option value="amount">Scale to $ volume</option>
+                  <option value="count">Scale to txn count</option>
+                </select>
+              </div>
+              <div class="sidebar-row" id="node-size-row"><label>Size</label>
+                <input type="range" id="s-node-size-range" min="10" max="120" value="45" style="flex:1"><span id="s-node-size-val">45</span>
+              </div>
+              <div class="sidebar-row" id="node-scale-opts" style="display:none"><label>Curve</label>
+                <select id="s-node-scale-log"><option value="true">Logarithmic</option><option value="false">Linear</option></select>
+              </div>
+              <div class="sidebar-row" id="node-mult-row" style="display:none"><label>Overall Size</label>
+                <input type="range" id="s-node-mult" min="0.4" max="2.5" step="0.05" value="1" style="flex:1"><span id="s-node-mult-val">1.0×</span>
               </div>                                                                                                                                                
               <div class="sidebar-row"><label>Color</label><input type="color" id="s-node-color" value="#58a6ff" class="color-input"></div>                         
               <div class="sidebar-row"><label>Icon</label><input type="file" id="s-node-icon" accept="image/*" style="font-size:11px;border:none;padding:0"></div>  
@@ -1925,12 +1945,22 @@ function buildLeftSidebar() {
               <div class="sidebar-row"><label>Arrow Size</label>                                                                                                    
                 <input type="range" id="s-arrow-size-range" min="0.5" max="5" value="2" step="0.1" style="flex:1"><span id="s-arrow-size-val">2</span>              
               </div>                                                                                                                                                
-              <div class="sidebar-row"><label>Thickness</label>                                                                                                     
-                <select id="s-edge-thickness"><option value="true" selected>Scaled to Amount</option><option value="false">Uniform</option></select>                
-              </div>                                                                                                                                                
-              <div class="sidebar-row" id="uniform-thickness-row" style="display:none"><label>Width</label>                                                         
-                <input type="range" id="s-edge-width" min="1" max="10" value="2" step="0.5" style="flex:1"><span id="s-edge-width-val">2</span>                     
-              </div>                                                                                                                                                
+              <div class="sidebar-row"><label>Thickness</label>
+                <select id="s-edge-scale-mode">
+                  <option value="uniform">Uniform</option>
+                  <option value="amount" selected>Scale to amount</option>
+                  <option value="count">Scale to txn count</option>
+                </select>
+              </div>
+              <div class="sidebar-row" id="uniform-thickness-row" style="display:none"><label>Width</label>
+                <input type="range" id="s-edge-width" min="0.5" max="14" value="2" step="0.5" style="flex:1"><span id="s-edge-width-val">2</span>
+              </div>
+              <div class="sidebar-row" id="edge-scale-opts"><label>Curve</label>
+                <select id="s-edge-scale-log"><option value="true">Logarithmic</option><option value="false">Linear</option></select>
+              </div>
+              <div class="sidebar-row" id="edge-mult-row"><label>Overall Width</label>
+                <input type="range" id="s-edge-mult" min="0.3" max="3" step="0.05" value="1" style="flex:1"><span id="s-edge-mult-val">1.0×</span>
+              </div>                                                                                                                                               
               <div class="sidebar-row"><label style="font-size:10px">Direction Colors</label>                                                                       
                 <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-dir-colors" disabled> Enable</label>                  
               </div>                                                                                                                                                
@@ -2009,12 +2039,28 @@ function buildLeftSidebar() {
         const apply = debounce(() => {
           try {
           STATE.nodeShape = $('#s-node-shape').value;                                                                                                             
-          STATE.nodeSize = $('#s-node-scaled').checked ? 'scaled' : parseInt($('#s-node-size-range').value);                                                        
+          STATE.nodeScaleMode = $('#s-node-scale-mode').value;
+          STATE.nodeScaleLog = $('#s-node-scale-log').value === 'true';
+          STATE.nodeSizeMult = parseFloat($('#s-node-mult').value);
+          STATE.nodeSize = parseInt($('#s-node-size-range').value);
+          const nUni = STATE.nodeScaleMode === 'uniform';
+          $('#node-size-row').style.display = nUni ? '' : 'none';
+          $('#node-scale-opts').style.display = nUni ? 'none' : '';
+          $('#node-mult-row').style.display = nUni ? 'none' : '';
+          $('#s-node-mult-val').textContent = STATE.nodeSizeMult.toFixed(2) + '×';                                                     
           STATE.nodeColor = $('#s-node-color').value;                                                                                                               
           STATE.edgeColor = $('#s-edge-color').value;                                                                                                               
           STATE.showArrows = $('#s-arrows').value === 'true';                                                                                                       
           STATE.arrowSize = parseFloat($('#s-arrow-size-range').value);                                                                                             
-          STATE.edgeThicknessScale = $('#s-edge-thickness').value === 'true';                                                                                       
+          STATE.edgeScaleMode = $('#s-edge-scale-mode').value;
+          STATE.edgeScaleLog = $('#s-edge-scale-log').value === 'true';
+          STATE.edgeSizeMult = parseFloat($('#s-edge-mult').value);
+          STATE.edgeThicknessScale = STATE.edgeScaleMode !== 'uniform';
+          const eUni = STATE.edgeScaleMode === 'uniform';
+          $('#uniform-thickness-row').style.display = eUni ? '' : 'none';
+          $('#edge-scale-opts').style.display = eUni ? 'none' : '';
+          $('#edge-mult-row').style.display = eUni ? 'none' : '';
+          $('#s-edge-mult-val').textContent = STATE.edgeSizeMult.toFixed(2) + '×';                                                                                  
           STATE.uniformEdgeWidth = parseFloat($('#s-edge-width').value);                                                                                            
           STATE.fontSize = parseInt($('#s-font-size').value);                                                                                                       
           STATE.labelPosition = $('#s-label-pos').value;                                                                                                            
@@ -2031,9 +2077,7 @@ function buildLeftSidebar() {
           $('#s-node-size-val').textContent = $('#s-node-size-range').value;                                                                                        
           $('#s-arrow-size-val').textContent = $('#s-arrow-size-range').value;                                                                                      
           $('#s-font-val').textContent = STATE.fontSize;                                                                                                            
-          $('#s-edge-width-val').textContent = $('#s-edge-width').value;                                                                                            
-          $('#s-node-size-range').disabled = $('#s-node-scaled').checked;                                                                                           
-          $('#uniform-thickness-row').style.display = STATE.edgeThicknessScale ? 'none' : '';                                                                       
+          $('#s-edge-width-val').textContent = $('#s-edge-width').value;                                                                                                                                                                
           const newDirColors = $('#s-dir-colors').checked;                                                                                                          
           const newInColor = $('#s-in-color').value;                                                                                                                
           const newOutColor = $('#s-out-color').value;                                                                                                              
@@ -2090,6 +2134,10 @@ function buildLeftSidebar() {
           STATE.nodeIcons = {};                                                                                                                                     
           STATE.nodeShapes = {};
           STATE.nodeColors = {};
+          STATE.nodeSizes = {};
+          STATE.nodeScaleMode = DEFAULTS.nodeScaleMode;
+          STATE.nodeScaleLog = DEFAULTS.nodeScaleLog;
+          STATE.nodeSizeMult = DEFAULTS.nodeSizeMult;
           STATE.nodeLabels = {};                                                                                                                                    
           STATE.fontSize = DEFAULTS.fontSize;                                                                                                                       
           STATE.fontFamily = DEFAULTS.fontFamily;                                                                                                                   
@@ -2101,8 +2149,7 @@ function buildLeftSidebar() {
           $('#s-node-size-range').value = DEFAULTS.nodeSize;                                                                                                        
           $('#s-node-size-val').textContent = DEFAULTS.nodeSize;                                                                                                    
           $('#s-node-color').value = DEFAULTS.nodeColor;                                                                                                            
-          $('#s-node-scaled').checked = false;                                                                                                                      
-          $('#s-node-size-range').disabled = false;                                                                                                                 
+                                                                                                                 
           $('#s-node-icon').value = '';                                                                                                                             
           $('#s-label-pos').value = DEFAULTS.labelPosition;                                                                                                         
           $('#s-font-size').value = DEFAULTS.fontSize;                                                                                                              
@@ -2125,6 +2172,10 @@ function buildLeftSidebar() {
           STATE.timelineSourceColors = {};
           STATE.edgeColors = {};
           STATE.edgeLabels = {};
+          STATE.edgeWidths = {};
+          STATE.edgeScaleMode = DEFAULTS.edgeScaleMode;
+          STATE.edgeScaleLog = DEFAULTS.edgeScaleLog;
+          STATE.edgeSizeMult = DEFAULTS.edgeSizeMult;
           STATE.linkLabel = {...DEFAULTS.linkLabel};
           $('#s-lbl-amount').checked = true;
           $('#s-lbl-count').checked = true;
@@ -2367,11 +2418,8 @@ function buildGraphElements(txns, mode) {
     txns.forEach(t => {                                                                                                                                             
       [t.from, t.to].forEach(ent => {                                                                                                                               
         if (!nodes.has(ent)) {                                                                                                                                      
-          const eData = STATE.entities.get(ent) || {txnCount: 1, totalIn: 0, totalOut: 0};                                                                          
-          let sz = baseNodeSize;                                                                                                                                    
-          if (STATE.nodeSize === 'scaled') {                                                                                                                        
-            sz = 45;                                                                                                                                                
-          }                                                                                                                                                         
+          const eData = STATE.entities.get(ent) || {txnCount: 1, totalIn: 0, totalOut: 0};
+          const sz = baseNodeSize;                                                                                                                                                        
           nodes.set(ent, {
             data: {
               id: ent, label: displayName(ent), size: sz,
@@ -2439,39 +2487,107 @@ function buildGraphElements(txns, mode) {
       });                                                                                                                                                           
     }                                                                                                                                                               
                                                                                                                                                                     
-    // Scale node sizes from filtered transactions                                                                                                                  
-    if (STATE.nodeSize === 'scaled') {                                                                                                                              
-      const nodeVols = new Map();                                                                                                                                   
-      txns.forEach(t => {                                                                                                                                           
-        const amt = Math.abs(t.amount || 0);                                                                                                                        
-        nodeVols.set(t.from, (nodeVols.get(t.from) || 0) + amt);                                                                                                    
-        nodeVols.set(t.to, (nodeVols.get(t.to) || 0) + amt);                                                                                                        
-      });                                                                                                                                                           
-      const volValues = Array.from(nodeVols.values());                                                                                                              
-      const logMin = Math.log1p(Math.min(...volValues));                                                                                                            
-      const logMax = Math.log1p(Math.max(...volValues));                                                                                                            
-      nodes.forEach((node, ent) => {                                                                                                                                
-        const vol = nodeVols.get(ent) || 0;                                                                                                                         
-        const t = logMax > logMin ? (Math.log1p(vol) - logMin) / (logMax - logMin) : 0.5;                                                                           
-        node.data.size = 25 + t * 55;                                                                                                                               
-      });                                                                                                                                                           
-    }                                                                                                                                                               
-                                                                                                                                                                    
-    // Scale edge thickness from filtered transactions                                                                                                              
-    if (STATE.edgeThicknessScale && edges.length > 0) {                                                                                                           
-      const edgeAmts = edges.map(e => Math.abs(e.data.amount || 0));                                                                                                
-      const logMin = Math.log1p(Math.min(...edgeAmts));                                                                                                             
-      const logMax = Math.log1p(Math.max(...edgeAmts));                                                                                                             
-      edges.forEach(e => {                                                                                                                                          
-        const amt = Math.abs(e.data.amount || 0);                                                                                                                   
-        const t = logMax > logMin ? (Math.log1p(amt) - logMin) / (logMax - logMin) : 0.5;                                                                           
-        e.data.thickness = 1 + t * 8;                                                                                                                               
-      });                                                                                                                                                           
-    }                                                                                                                                                               
+    // Sizes via the shared sizing engine
+    const nodeSizeFn = nodeSizerFor(txns);
+    nodes.forEach((node, ent) => { node.data.size = nodeSizeFn(ent); });
+
+    const edgeWidthFn = edgeSizerFor(edges.map(e => ({id: e.data.id, amount: e.data.amount, count: e.data.count})));
+    edges.forEach(e => { e.data.thickness = edgeWidthFn(e.data.id); });                                                                                                                                                               
                                                                                                                                                                     
 return applyGroupsToElements(Array.from(nodes.values()), edges);
   }
 
+/* ==========================================================================
+   SIZING ENGINE — one source of truth for node & link sizes
+   ========================================================================== */
+const NODE_RANGE = [25, 80];
+const EDGE_RANGE = [1, 9];
+
+function normalize(val, min, max, useLog) {
+  if (max <= min) return 0.5;
+  if (useLog) {
+    const lo = Math.log1p(min), hi = Math.log1p(max);
+    return hi > lo ? (Math.log1p(val) - lo) / (hi - lo) : 0.5;
+  }
+  return (val - min) / (max - min);
+}
+
+/* Per-entity metric from the filtered transactions */
+function computeNodeMetrics(txns) {
+  const m = new Map();
+  txns.forEach(t => {
+    [t.from, t.to].forEach(ent => {
+      if (!m.has(ent)) m.set(ent, {amount: 0, count: 0});
+    });
+    const amt = Math.abs(t.amount || 0);
+    const f = m.get(t.from), o = m.get(t.to);
+    f.amount += amt; o.amount += amt;
+    f.count++; o.count++;
+  });
+  return m;
+}
+
+function nodeSizerFor(txns) {
+  const mode = STATE.nodeScaleMode;
+  const mult = STATE.nodeSizeMult || 1;
+  const base = typeof STATE.nodeSize === 'number' ? STATE.nodeSize : 45;
+
+  if (mode === 'uniform') {
+    return ent => STATE.nodeSizes[ent] != null ? STATE.nodeSizes[ent] : base * mult;
+  }
+  const metrics = computeNodeMetrics(txns);
+  const vals = Array.from(metrics.values()).map(v => v[mode]);
+  const min = vals.length ? Math.min(...vals) : 0;
+  const max = vals.length ? Math.max(...vals) : 1;
+  return ent => {
+    if (STATE.nodeSizes[ent] != null) return STATE.nodeSizes[ent];
+    const v = metrics.get(ent) ? metrics.get(ent)[mode] : 0;
+    const t = normalize(v, min, max, STATE.nodeScaleLog);
+    return (NODE_RANGE[0] + t * (NODE_RANGE[1] - NODE_RANGE[0])) * mult;
+  };
+}
+
+/* edges: pass the array of {id, amount, count} that will be drawn */
+function edgeSizerFor(edgeStats) {
+  const mode = STATE.edgeScaleMode;
+  const mult = STATE.edgeSizeMult || 1;
+
+  if (mode === 'uniform') {
+    return id => STATE.edgeWidths[id] != null ? STATE.edgeWidths[id] : (STATE.uniformEdgeWidth || 2) * mult;
+  }
+  const pick = s => mode === 'count' ? (s.count || 1) : Math.abs(s.amount || 0);
+  const vals = edgeStats.map(pick);
+  const min = vals.length ? Math.min(...vals) : 0;
+  const max = vals.length ? Math.max(...vals) : 1;
+  const byId = new Map(edgeStats.map(s => [s.id, pick(s)]));
+  return id => {
+    if (STATE.edgeWidths[id] != null) return STATE.edgeWidths[id];
+    const t = normalize(byId.get(id) || 0, min, max, STATE.edgeScaleLog);
+    return (EDGE_RANGE[0] + t * (EDGE_RANGE[1] - EDGE_RANGE[0])) * mult;
+  };
+}
+
+/* Re-apply sizes to live graphs without a full re-render */
+function applySizes() {
+  const txns = getFilteredTransactions();
+  const nodeSize = nodeSizerFor(txns);
+  [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
+    cy.nodes().forEach(n => {
+      if (n.data('isGroup')) {
+        const g = STATE.groups.get(n.data('groupId'));
+        if (STATE.nodeSizes[n.id()] != null) { n.data('size', STATE.nodeSizes[n.id()]); return; }
+        let s = 0;
+        if (g) g.members.forEach(m => { s = Math.max(s, nodeSize(m)); });
+        n.data('size', Math.max(s || 55, 55 * (STATE.nodeSizeMult || 1)));
+      } else {
+        n.data('size', nodeSize(n.id()));
+      }
+    });
+    const stats = cy.edges().map(e => ({id: e.id(), amount: e.data('amount'), count: e.data('count')}));
+    const edgeW = edgeSizerFor(stats);
+    cy.edges().forEach(e => e.data('thickness', edgeW(e.id())));
+  });
+}
 
 function getCyStyle() {
   const valign = STATE.labelPosition === 'center' ? 'center' : STATE.labelPosition;
@@ -2871,24 +2987,7 @@ function updateGraphStyles() {
     const cys = [STATE.cyDetail, STATE.cySummary].filter(Boolean);                                                                                                  
                                                                                                                                                                     
     cys.forEach(cy => {                                                                                                                                             
-      if (STATE.nodeSize !== 'scaled') {                                                                                                                            
-        const newSize = typeof STATE.nodeSize === 'number' ? STATE.nodeSize : 45;                                                                                   
-        cy.nodes().forEach(node => {                                                                                                                                
-          node.data('size', newSize);                                                                                                                               
-        });                                                                                                                                                         
-      } else {                                                                                                                                                      
-        const vols = Array.from(STATE.entities.values()).map(e => e.totalIn + e.totalOut);                                                                                
-  const minVol = Math.min(...vols);                                                                                                                                 
-  const maxVol = Math.max(...vols);                                                                                                                                 
-  const logMin = Math.log1p(minVol);                                                                                                                                
-  const logMax = Math.log1p(maxVol);                                                                                                                                
-  cy.nodes().forEach(node => {                                                                                                                                      
-    const eData = STATE.entities.get(node.id()) || {txnCount: 1, totalIn: 0, totalOut: 0};                                                                          
-    const vol = eData.totalIn + eData.totalOut;                                                                                                                     
-    const t = logMax > logMin ? (Math.log1p(vol) - logMin) / (logMax - logMin) : 0.5;                                                                               
-    node.data('size', 25 + t * 55);                                                                                                                                 
-  });                                                                                                                                                         
-      }                                                                                                                                                             
+               applySizes();                                                                                                                                                   
                                                                                                                                                                     
       // Update per-entity shapes                                                                                                                                   
       cy.nodes().forEach(node => {                                                                                                                                  
@@ -2910,16 +3009,6 @@ function updateGraphStyles() {
     if (STATE.edgeColors[edge.id()]) color = STATE.edgeColors[edge.id()];
     edge.data('color', color);                                                                                                                                     
                                                                                                                                                                     
-    if (STATE.edgeThicknessScale) {                                                                                                                                 
-      const amt = edge.data('amount');                                                                                                                              
-      if (amt != null) {                                                                                                                                            
-        const maxAmt = Math.max(...cy.edges().map(e => Math.abs(e.data('amount') || 0)), 1);                                                                        
-        const thickness = 1 + (Math.abs(amt) / maxAmt) * 8;                                                                                                         
-        edge.data('thickness', thickness);                                                                                                                          
-      }                                                                                                                                                             
-    } else {                                                                                                                                                        
-      edge.data('thickness', STATE.uniformEdgeWidth);                                                                                                               
-    }                                                                                                                                                               
   });                                                                                                                                                           
                                                                                                                                                                     
       cy.style(getCyStyle());
@@ -3242,7 +3331,34 @@ if (type === 'node') {
         if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
       });
       colorItem.appendChild(colorReset);
-      menu.appendChild(colorItem);  
+      menu.appendChild(colorItem);
+
+      // Per-node size
+      const nSizeItem = el('div', {className: 'context-menu-item', style: 'display:flex;align-items:center;gap:6px;'});
+      nSizeItem.appendChild(el('span', {textContent: 'Size:'}));
+      const curNSize = Math.round(target.width());
+      const nSlider = el('input', {type: 'range', min: '10', max: '160', step: '1', value: String(STATE.nodeSizes[target.id()] != null ? STATE.nodeSizes[target.id()] : curNSize), style: 'width:90px'});
+      const nVal = el('span', {textContent: String(STATE.nodeSizes[target.id()] != null ? Math.round(STATE.nodeSizes[target.id()]) : curNSize), style: 'font-size:10px;color:var(--text-muted);width:24px'});
+      nSlider.addEventListener('click', ev => ev.stopPropagation());
+      nSlider.addEventListener('input', ev => {
+        const v = parseFloat(ev.target.value);
+        const ids = STATE.shiftSelected.size > 1 ? Array.from(STATE.shiftSelected) : [target.id()];
+        ids.forEach(id => { STATE.nodeSizes[id] = v; });
+        nVal.textContent = Math.round(v);
+        [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(c => {
+          ids.forEach(id => { const n = c.getElementById(id); if (n.length) n.data('size', v); });
+        });
+      });
+      nSizeItem.appendChild(nSlider); nSizeItem.appendChild(nVal);
+      const nSizeReset = el('span', {textContent: '↺', style: 'cursor:pointer;font-size:14px;color:var(--text-muted);', title: 'Back to automatic size'});
+      nSizeReset.addEventListener('click', ev => {
+        ev.stopPropagation();
+        const ids = STATE.shiftSelected.size > 1 ? Array.from(STATE.shiftSelected) : [target.id()];
+        ids.forEach(id => delete STATE.nodeSizes[id]);
+        applySizes();
+      });
+      nSizeItem.appendChild(nSizeReset);
+      menu.appendChild(nSizeItem); 
 
       // Rename (display only)
       if (!target.data('isGroup')) {
@@ -3342,6 +3458,31 @@ if (type === 'node') {
       });
       colorItem.appendChild(ecReset);
       menu.appendChild(colorItem);
+
+      // Per-link width
+      const wItem = el('div', {className: 'context-menu-item', style: 'display:flex;align-items:center;gap:6px;'});
+      wItem.appendChild(el('span', {textContent: applyTo.length > 1 ? `Width (${applyTo.length}):` : 'Width:'}));
+      const curW = STATE.edgeWidths[eid] != null ? STATE.edgeWidths[eid] : (target.data('thickness') || 2);
+      const wSlider = el('input', {type: 'range', min: '0.5', max: '20', step: '0.5', value: String(curW), style: 'width:90px'});
+      const wVal = el('span', {textContent: String(Math.round(curW * 10) / 10), style: 'font-size:10px;color:var(--text-muted);width:24px'});
+      wSlider.addEventListener('click', ev => ev.stopPropagation());
+      wSlider.addEventListener('input', ev => {
+        const v = parseFloat(ev.target.value);
+        applyTo.forEach(id => { STATE.edgeWidths[id] = v; });
+        wVal.textContent = v;
+        [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(c => {
+          applyTo.forEach(id => { const ed = c.getElementById(id); if (ed.length) ed.data('thickness', v); });
+        });
+      });
+      wItem.appendChild(wSlider); wItem.appendChild(wVal);
+      const wReset = el('span', {textContent: '↺', style: 'cursor:pointer;font-size:14px;color:var(--text-muted);', title: 'Back to automatic width'});
+      wReset.addEventListener('click', ev => {
+        ev.stopPropagation();
+        applyTo.forEach(id => delete STATE.edgeWidths[id]);
+        applySizes();
+      });
+      wItem.appendChild(wReset);
+      menu.appendChild(wItem);
 
       menu.appendChild(el('div', {className: 'context-menu-item', innerHTML: '&#9998; Edit link label…', onClick: () => { hideContextMenu(); openEdgeLabelModal(eid); }}));
       if (STATE.edgeLabels[eid] != null) {
@@ -4485,7 +4626,6 @@ function applyGroupsToElements(nodes, edges) {
     m.descAgg = [...new Set((m.txns || []).map(x => (x.desc || '').trim()).filter(Boolean))].slice(0, 3).join('; ');
     if (STATE.edgeColors[m.id]) m.color = STATE.edgeColors[m.id];
     m.label = buildLinkLabel({id: m.id, amount: m.amount, count: m.count, desc: m.descAgg, isSummary: true});
-    if (STATE.edgeThicknessScale) { const allAmts = [...filteredEdges.map(e => Math.abs(e.data.amount||0)), ...Array.from(mergedEdgeMap.values()).map(e => e.amount)]; const maxA = Math.max(...allAmts, 1); m.thickness = 1 + (m.amount / maxA) * 8; }
   });
   return {nodes: [...filteredNodes, ...groupNodes], edges: [...filteredEdges, ...Array.from(mergedEdgeMap.values()).map(m => ({data: m}))]};
 }
@@ -4849,6 +4989,9 @@ const VISUAL_KEYS = [
   'viewMode','layoutName','layoutRootEntity','mainEntity',
   'nodeIcons','nodeShapes','nodeColors','nodeLabels',
   'edgeColors','edgeLabels','linkLabel',
+  'nodeSizes','edgeWidths',
+  'nodeScaleMode','nodeScaleLog','nodeSizeMult',
+  'edgeScaleMode','edgeScaleLog','edgeSizeMult',
   'labelPosition','roundNumbers','showTimeline',
   'timelineTimezone','timelineZoom','timelineHeight','timelineAxisMode',
   'timelineLineMode','timelineSourceColors','timelineDotScale','timelineLineScale',
@@ -4946,12 +5089,16 @@ function syncControlsFromState() {
   const chk = (sel, val) => { const e = $(sel); if (e) e.checked = !!val; };
   const txt = (sel, val) => { const e = $(sel); if (e) e.textContent = val; };
 
-  const scaled = STATE.nodeSize === 'scaled';
   set('#s-node-shape', STATE.nodeShape);
-  set('#s-node-size-range', scaled ? 45 : STATE.nodeSize);
-  txt('#s-node-size-val', scaled ? 45 : STATE.nodeSize);
-  chk('#s-node-scaled', scaled);
-  if ($('#s-node-size-range')) $('#s-node-size-range').disabled = scaled;
+  set('#s-node-scale-mode', STATE.nodeScaleMode);
+  set('#s-node-scale-log', String(!!STATE.nodeScaleLog));
+  set('#s-node-mult', STATE.nodeSizeMult); txt('#s-node-mult-val', (STATE.nodeSizeMult||1).toFixed(2) + '×');
+  set('#s-node-size-range', typeof STATE.nodeSize === 'number' ? STATE.nodeSize : 45);
+  txt('#s-node-size-val', typeof STATE.nodeSize === 'number' ? STATE.nodeSize : 45);
+  const nUni2 = STATE.nodeScaleMode === 'uniform';
+  if ($('#node-size-row')) $('#node-size-row').style.display = nUni2 ? '' : 'none';
+  if ($('#node-scale-opts')) $('#node-scale-opts').style.display = nUni2 ? 'none' : '';
+  if ($('#node-mult-row')) $('#node-mult-row').style.display = nUni2 ? 'none' : '';
   set('#s-node-color', STATE.nodeColor);
   set('#s-label-pos', STATE.labelPosition);
   set('#s-font-size', STATE.fontSize);   txt('#s-font-val', STATE.fontSize);
@@ -4963,9 +5110,14 @@ function syncControlsFromState() {
   set('#s-edge-color', STATE.edgeColor);
   set('#s-arrows', String(!!STATE.showArrows));
   set('#s-arrow-size-range', STATE.arrowSize); txt('#s-arrow-size-val', STATE.arrowSize);
-  set('#s-edge-thickness', String(!!STATE.edgeThicknessScale));
+  set('#s-edge-scale-mode', STATE.edgeScaleMode);
+  set('#s-edge-scale-log', String(!!STATE.edgeScaleLog));
+  set('#s-edge-mult', STATE.edgeSizeMult); txt('#s-edge-mult-val', (STATE.edgeSizeMult||1).toFixed(2) + '×');
   set('#s-edge-width', STATE.uniformEdgeWidth); txt('#s-edge-width-val', STATE.uniformEdgeWidth);
-  if ($('#uniform-thickness-row')) $('#uniform-thickness-row').style.display = STATE.edgeThicknessScale ? 'none' : '';
+  const eUni2 = STATE.edgeScaleMode === 'uniform';
+  if ($('#uniform-thickness-row')) $('#uniform-thickness-row').style.display = eUni2 ? '' : 'none';
+  if ($('#edge-scale-opts')) $('#edge-scale-opts').style.display = eUni2 ? 'none' : '';
+  if ($('#edge-mult-row')) $('#edge-mult-row').style.display = eUni2 ? 'none' : '';
   chk('#s-dir-colors', STATE.useDirectionColors);
   if ($('#s-dir-colors')) $('#s-dir-colors').disabled = !STATE.mainEntity;
   if ($('#dir-color-picks')) $('#dir-color-picks').style.display = (STATE.useDirectionColors && STATE.mainEntity) ? '' : 'none';
