@@ -151,6 +151,16 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 .view-toggle button.active { background: var(--accent-dim); color: #fff; }
 #topbar .spacer { flex: 1; }
 
+/* Chart Tab Bar */
+#chart-bar { background: var(--bg-tertiary); border-bottom: 1px solid var(--border); padding: 4px 8px; display: flex; align-items: center; gap: 4px; flex-shrink: 0; overflow-x: auto; }
+.chart-tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-secondary); color: var(--text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.chart-tab:hover { border-color: var(--border-light); color: var(--text-primary); }
+.chart-tab.active { background: var(--accent-dim); border-color: var(--accent); color: #fff; }
+.chart-tab .ct-close { opacity: 0.5; font-size: 13px; }
+.chart-tab .ct-close:hover { opacity: 1; color: var(--red); }
+#chart-bar .cb-actions { margin-left: auto; display: flex; gap: 4px; flex-shrink: 0; }
+#autosave-note { font-size: 10px; color: var(--text-muted); margin-left: 8px; white-space: nowrap; }
+
 /* Filter Bar */
 #filter-bar { background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 6px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
 #filter-bar label { margin-right: 2px; }
@@ -465,6 +475,13 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   layoutName: 'fcose',
   layoutRootEntity: null,
   _preTimelineLayout: null,
+  charts: [],
+  activeChart: 0,
+  _pristine: null,
+  datasets: {},
+  activeDataset: null,
+  _datasetCounter: 0,
+  _wizardMode: 'initial',   // initial | swap | newchart
 };
 const DEFAULTS = {                                                                                                                                                
     nodeShape: 'ellipse', nodeSize: 45, nodeColor: '#58a6ff',                                                                                                       
@@ -733,6 +750,7 @@ function buildDOM() {
   </div>
   <div id="app-container">
     <div id="topbar"></div>
+    <div id="chart-bar"></div>
     <div id="filter-bar"></div>
     <div id="main-content">
       <div id="left-sidebar"></div>
@@ -758,6 +776,7 @@ function buildDOM() {
   <div id="summary-modal"><div class="summary-content"><div style="display:flex;justify-content:space-between;align-items:center;"><h3>Narrative Summary</h3><button class="icon-btn" id="summary-close">&times;</button></div><div class="summary-text" id="summary-text"></div><div class="wizard-nav" style="margin-top:16px"><button id="summary-copy">Copy to Clipboard</button></div></div></div>
   <div id="export-modal"><div class="export-content"><h3>Export to PDF</h3><div class="export-field"><label>Report Header</label><input id="exp-header" value="Transaction Intelligence Report"></div><div class="export-field"><label>Case Reference</label><input id="exp-case" placeholder="e.g. CASE-2024-0042"></div><div class="export-field"><label>Watermark Text</label><input id="exp-watermark" placeholder="e.g. CONFIDENTIAL"></div><div class="wizard-nav"><button id="exp-cancel">Cancel</button><button class="primary" id="exp-go">Export PDF</button></div></div></div>
 <div class="graph-tooltip" id="tooltip" style="display:none"></div>
+  <input type="file" id="session-file-input" accept=".json,.trace.json" style="display:none">
   <div id="rename-modal">
     <div class="rename-content">
       <h3 style="margin-bottom:4px;">Rename Entity</h3>
@@ -830,6 +849,9 @@ function showUploadStep() {
     <input type="file" id="file-input" accept=".csv,.xlsx,.xls" style="display:none">
     <div style="text-align:center;margin-bottom:16px;">
       <button id="browse-btn" class="primary">Browse Files</button>
+      <button id="restore-btn" title="Open a previously saved .trace.json session">Open Saved Session</button>
+      <button id="wiz-cancel" style="display:none">Cancel</button>
+    </div>
     </div>
     <div class="upload-divider">or</div>
     <div class="db-import-section">
@@ -859,7 +881,18 @@ function showUploadStep() {
   dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
   $('#browse-btn').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  $('#restore-btn').addEventListener('click', () => $('#session-file-input').click());
   $('#db-import-btn').addEventListener('click', handleDatabricksImport);
+  const swapping = STATE._wizardMode && STATE._wizardMode !== 'initial';
+  if (swapping) {
+    $('#restore-btn').style.display = 'none';
+    $('#wiz-cancel').style.display = '';
+    $('#wiz-cancel').addEventListener('click', cancelWizard);
+    $('.wizard-card h2').textContent = STATE._wizardMode === 'swap'
+      ? 'Replace Data Source' : 'New Chart — Choose Data';
+  } else {
+    checkAutosave();
+  }
   $('#db-preview-btn').addEventListener('click', async () => {
     const origLimit = $('#db-limit').value;
     $('#db-limit').value = '100';
@@ -1208,9 +1241,8 @@ function showMapperStep() {
       FIELD_DEFS.forEach(fd => {                                                                                                                                    
         STATE.mapping[fd.key] = hidden.has(fd.key) ? '' : selects[fd.key].value;                                                                                    
       });                                                                                                                                                           
-      processData();                                                                                                                                                
-      launchApp();                                                                                                                                                  
-    });                                                                                                                                                             
+      finishMapping();
+    });
   }
 
 
@@ -1498,6 +1530,12 @@ function launchApp() {
   buildRightSidebar();
   renderGraphs();
   bindGlobalEvents();
+  if (!STATE.charts || !STATE.charts.length) {
+    STATE._pristine = captureChart('Chart 1');
+    STATE.charts = [captureChart('Chart 1')];
+    STATE.activeChart = 0;
+  }
+  buildChartBar();
 }
 
 
@@ -1532,7 +1570,7 @@ function buildTopbar() {
     <button id="btn-export" class="primary">Export PDF</button>
     <button id="btn-anomaly-toggle" title="Toggle Findings Panel">Findings (${STATE.anomalies.length})</button>
     <div class="topbar-divider"></div>
-    <button id="btn-new-chart">New Chart</button>
+    <button id="btn-new-chart" title="Clear everything and start over">New Session</button>
     <button id="btn-save" title="Save current chart as image">Save PNG</button>
   `;
   // View toggle
@@ -1594,7 +1632,7 @@ function buildTopbar() {
     else { rs.classList.add('active'); }
   });
   $('#btn-new-chart').addEventListener('click', () => {
-    if (confirm('Start a new chart? Current work will be lost.')) {
+    if (confirm('Start a new session? All charts and data will be cleared.')) {
       STATE.cyDetail && STATE.cyDetail.destroy();
       STATE.cySummary && STATE.cySummary.destroy();
       STATE.cyDetail = null; STATE.cySummary = null;
@@ -1602,6 +1640,11 @@ function buildTopbar() {
       $('#wizard-overlay').classList.remove('hidden');
       STATE.rawData = []; STATE.transactions = []; STATE.entities.clear(); STATE.entityPairs.clear();
       STATE.anomalies = []; STATE.mapping = {}; STATE._persistentPositions = {};
+      STATE.charts = []; STATE.activeChart = 0; STATE._pristine = null;
+      STATE.datasets = {}; STATE.activeDataset = null; STATE._datasetCounter = 0;
+      STATE._wizardMode = 'initial';
+      STATE.annotations = []; STATE.groups = new Map();
+      $('#chart-bar').innerHTML = '';
       showUploadStep();
     }
   });
@@ -2818,6 +2861,10 @@ function renderGraphs() {
   buildRightSidebar();
   renderAllAnnotations();
   if (STATE.showTimeline) renderTimeline(txns);
+  if (STATE.charts && STATE.charts.length) {
+    STATE.charts[STATE.activeChart] = captureChart(STATE.charts[STATE.activeChart].name);
+    scheduleAutosave();
+  }
 }
 
 function updateGraphStyles() {                                                                                                                                    
@@ -4793,10 +4840,454 @@ function renderAllAnnotations() {
 }
 
 /* ==========================================================================
+   WORKSPACE — CHART TABS, SNAPSHOTS, SAVE / LOAD / AUTOSAVE
+   ========================================================================== */
+const SNAPSHOT_VERSION = 1;
+const AUTOSAVE_KEY = 'trace_autosave_v1';
+
+const VISUAL_KEYS = [
+  'viewMode','layoutName','layoutRootEntity','mainEntity',
+  'nodeIcons','nodeShapes','nodeColors','nodeLabels',
+  'edgeColors','edgeLabels','linkLabel',
+  'labelPosition','roundNumbers','showTimeline',
+  'timelineTimezone','timelineZoom','timelineHeight','timelineAxisMode',
+  'timelineLineMode','timelineSourceColors','timelineDotScale','timelineLineScale',
+  'timelineArrowSize','timelineAxisFont','_timelineEntityOrder',
+  'edgeColor','nodeColor','inColor','outColor','useDirectionColors',
+  'nodeSize','arrowSize','nodeShape','edgeThicknessScale','uniformEdgeWidth',
+  'showArrows','fontSize','fontFamily','fontColor','fontBold','fontItalic',
+  'edgeFontSize','edgeFontColor','edgeFontBold','edgeFontItalic',
+  'showLegend','bgColor','summaryText','exportFields'
+];
+
+function clone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+
+function currentPositions() {
+  const pos = {...(STATE._persistentPositions || {})};
+  [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
+    cy.nodes().forEach(n => { pos[n.id()] = {...n.position()}; });
+  });
+  return pos;
+}
+
+function captureChart(name) {
+  const visual = {};
+  VISUAL_KEYS.forEach(k => { visual[k] = clone(STATE[k]); });
+  return {
+    name: name || 'Chart',
+    datasetId: STATE.activeDataset,
+    visual,
+    filters: {
+      ...clone({...STATE.filters, dateMin: null, dateMax: null}),
+      dateMin: STATE.filters.dateMin ? STATE.filters.dateMin.toISOString() : null,
+      dateMax: STATE.filters.dateMax ? STATE.filters.dateMax.toISOString() : null,
+    },
+    groups: Array.from(STATE.groups.values()).map(g => ({
+      id: g.id, name: g.name, color: g.color, members: Array.from(g.members)
+    })),
+    groupCounter: STATE._groupCounter,
+    annotations: clone(STATE.annotations),
+    positions: currentPositions(),
+  };
+}
+
+function applyChart(snap) {
+  if (snap.datasetId && snap.datasetId !== STATE.activeDataset) activateDataset(snap.datasetId);
+  VISUAL_KEYS.forEach(k => { if (k in snap.visual) STATE[k] = clone(snap.visual[k]); });
+
+  STATE.filters = {...snap.filters};
+  STATE.filters.dateMin = snap.filters.dateMin ? new Date(snap.filters.dateMin) : null;
+  STATE.filters.dateMax = snap.filters.dateMax ? new Date(snap.filters.dateMax) : null;
+
+  STATE.groups = new Map();
+  (snap.groups || []).forEach(g => {
+    STATE.groups.set(g.id, {id: g.id, name: g.name, color: g.color, members: new Set(g.members)});
+  });
+  STATE._groupCounter = snap.groupCounter || 0;
+
+  STATE.annotations = clone(snap.annotations) || [];
+  STATE._persistentPositions = clone(snap.positions) || {};
+  STATE._savedPositions = clone(snap.positions) || null;
+  STATE._skipPositionRestore = false;
+
+  if (STATE._tlPlayInterval) { clearInterval(STATE._tlPlayInterval); STATE._tlPlayInterval = null; }
+  STATE._tlRefresh = null;
+
+  buildFilterBar();
+  buildLeftSidebar();
+  buildGroupsSidebarSection();
+  syncControlsFromState();
+  applyViewModeUI();
+  renderGraphs();
+}
+
+function applyViewModeUI() {
+  $$('.view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === STATE.viewMode));
+  const panel = $('#timeline-panel');
+  if (STATE.viewMode === 'timeline') {
+    STATE.showTimeline = true;
+    panel.style.flexBasis = (STATE.timelineHeight || 360) + 'px';
+    panel.classList.add('active');
+  } else {
+    STATE.showTimeline = false;
+    panel.classList.remove('active');
+    $('#timeline-container').innerHTML = '';
+  }
+  const icons = {radial: '✺', hierarchy_from: '⤵'};
+  const names = {radial: 'Radial', hierarchy_from: 'Hierarchy'};
+  const def = LAYOUT_DEFS[STATE.layoutName];
+  $('#layout-icon').textContent = def ? def.icon : (icons[STATE.layoutName] || '◎');
+  $('#layout-label').textContent = def ? def.label.split('(')[0].trim() : (names[STATE.layoutName] || 'Layout');
+  $('#chk-round').checked = !!STATE.roundNumbers;
+}
+
+function syncControlsFromState() {
+  const set = (sel, val) => { const e = $(sel); if (e) e.value = val; };
+  const chk = (sel, val) => { const e = $(sel); if (e) e.checked = !!val; };
+  const txt = (sel, val) => { const e = $(sel); if (e) e.textContent = val; };
+
+  const scaled = STATE.nodeSize === 'scaled';
+  set('#s-node-shape', STATE.nodeShape);
+  set('#s-node-size-range', scaled ? 45 : STATE.nodeSize);
+  txt('#s-node-size-val', scaled ? 45 : STATE.nodeSize);
+  chk('#s-node-scaled', scaled);
+  if ($('#s-node-size-range')) $('#s-node-size-range').disabled = scaled;
+  set('#s-node-color', STATE.nodeColor);
+  set('#s-label-pos', STATE.labelPosition);
+  set('#s-font-size', STATE.fontSize);   txt('#s-font-val', STATE.fontSize);
+  set('#s-font-family', STATE.fontFamily);
+  set('#s-font-color', STATE.fontColor);
+  chk('#s-font-bold', STATE.fontBold);
+  chk('#s-font-italic', STATE.fontItalic);
+
+  set('#s-edge-color', STATE.edgeColor);
+  set('#s-arrows', String(!!STATE.showArrows));
+  set('#s-arrow-size-range', STATE.arrowSize); txt('#s-arrow-size-val', STATE.arrowSize);
+  set('#s-edge-thickness', String(!!STATE.edgeThicknessScale));
+  set('#s-edge-width', STATE.uniformEdgeWidth); txt('#s-edge-width-val', STATE.uniformEdgeWidth);
+  if ($('#uniform-thickness-row')) $('#uniform-thickness-row').style.display = STATE.edgeThicknessScale ? 'none' : '';
+  chk('#s-dir-colors', STATE.useDirectionColors);
+  if ($('#s-dir-colors')) $('#s-dir-colors').disabled = !STATE.mainEntity;
+  if ($('#dir-color-picks')) $('#dir-color-picks').style.display = (STATE.useDirectionColors && STATE.mainEntity) ? '' : 'none';
+  set('#s-in-color', STATE.inColor);
+  set('#s-out-color', STATE.outColor);
+  set('#s-edge-font-size', STATE.edgeFontSize); txt('#s-edge-font-val', STATE.edgeFontSize);
+  set('#s-edge-font-color', STATE.edgeFontColor);
+  chk('#s-edge-font-bold', STATE.edgeFontBold);
+  chk('#s-edge-font-italic', STATE.edgeFontItalic);
+
+  chk('#s-lbl-amount', STATE.linkLabel.showAmount);
+  chk('#s-lbl-count', STATE.linkLabel.showCount);
+  chk('#s-lbl-desc', STATE.linkLabel.showDesc);
+  set('#s-lbl-desc-pos', STATE.linkLabel.descPosition);
+  set('#s-lbl-desc-style', STATE.linkLabel.descStyle);
+  if ($('#lbl-desc-opts')) $('#lbl-desc-opts').style.display = STATE.linkLabel.showDesc ? '' : 'none';
+  if ($('#lbl-desc-row') && !STATE.mapping.desc) $('#lbl-desc-row').style.display = 'none';
+
+  chk('#s-legend', STATE.showLegend);
+  set('#s-bg-color', STATE.bgColor);
+
+  set('#f-main-entity', STATE.mainEntity || '');
+  if ($('#direction-filter')) $('#direction-filter').style.display = STATE.mainEntity ? '' : 'none';
+  set('#f-direction', STATE.filters.direction || '');
+  if (STATE.filters.dateMin && $('#f-date-min')) $('#f-date-min').value = STATE.filters.dateMin.toISOString().slice(0,10);
+  if (STATE.filters.dateMax && $('#f-date-max')) $('#f-date-max').value = STATE.filters.dateMax.toISOString().slice(0,10);
+  if (STATE.filters.amountMin != null && $('#f-amt-min')) $('#f-amt-min').value = Math.floor(STATE.filters.amountMin);
+  if (STATE.filters.amountMax != null && $('#f-amt-max')) $('#f-amt-max').value = Math.ceil(STATE.filters.amountMax);
+  set('#f-type', STATE.filters.type || '');
+}
+
+/* ---------------- datasets ---------------- */
+function registerDataset() {
+  STATE._datasetCounter++;
+  const id = 'ds_' + STATE._datasetCounter;
+  let name = STATE.fileName || ('Dataset ' + STATE._datasetCounter);
+  if (STATE.sheetNames && STATE.sheetNames.length > 1) name += ' · ' + STATE.sheetNames[STATE.selectedSheet];
+  const ds = {
+    id, name, fileName: STATE.fileName,
+    headers: [...STATE.headers],
+    mapping: {...STATE.mapping},
+    dataShape: STATE.dataShape,
+    rawData: STATE.rawData,
+  };
+  STATE.datasets[id] = ds;
+  return ds;
+}
+
+function activateDataset(id) {
+  const ds = STATE.datasets[id];
+  if (!ds) return;
+  STATE.rawData = ds.rawData;
+  STATE.headers = ds.headers;
+  STATE.mapping = ds.mapping;
+  STATE.dataShape = ds.dataShape;
+  STATE.fileName = ds.fileName;
+  STATE.activeDataset = id;
+  STATE.filters.dateMin = STATE.filters.dateMax = null;
+  STATE.filters.amountMin = STATE.filters.amountMax = null;
+  processData();
+}
+
+function resetFiltersForDataset() {
+  STATE.filters.entities = [];
+  STATE.filters.type = '';
+  STATE.filters.direction = '';
+  if (STATE.mainEntity && !STATE.entities.has(STATE.mainEntity)) STATE.mainEntity = '';
+  STATE.layoutRootEntity = STATE.mainEntity || null;
+  if ((STATE.layoutName === 'radial' || STATE.layoutName === 'hierarchy_from') && !STATE.mainEntity) {
+    STATE.layoutName = 'fcose';
+  }
+  STATE._persistentPositions = {};
+  STATE._savedPositions = null;
+  STATE._timelineEntityOrder = [];
+}
+
+function startWizard(mode) {
+  STATE._wizardMode = mode;
+  STATE.workbook = null; STATE.sheetNames = []; STATE.selectedSheet = 0; STATE.headerRow = 0;
+  $('#wizard-overlay').classList.remove('hidden');
+  showUploadStep();
+}
+
+function cancelWizard() {
+  STATE._wizardMode = 'initial';
+  $('#wizard-overlay').classList.add('hidden');
+  STATE.activeDataset = null;               // force a clean re-activate
+  applyChart(STATE.charts[STATE.activeChart]);
+  buildChartBar();
+}
+
+function finishMapping() {
+  const mode = STATE._wizardMode || 'initial';
+  const ds = registerDataset();
+
+  if (mode === 'initial') {
+    activateDataset(ds.id);
+    launchApp();
+    return;
+  }
+
+  activateDataset(ds.id);
+  resetFiltersForDataset();
+  STATE._skipPositionRestore = true;
+
+  if (mode === 'newchart') {
+    STATE.charts[STATE.activeChart] = captureChart(STATE.charts[STATE.activeChart].name);
+    const base = clone(STATE._pristine);
+    base.name = `Chart ${STATE.charts.length + 1}`;
+    base.datasetId = ds.id;
+    base.positions = {};
+    base.groups = []; base.annotations = [];
+    base.filters = {...STATE.filters,
+      dateMin: STATE.filters.dateMin ? STATE.filters.dateMin.toISOString() : null,
+      dateMax: STATE.filters.dateMax ? STATE.filters.dateMax.toISOString() : null};
+    STATE.charts.push(base);
+    STATE.activeChart = STATE.charts.length - 1;
+  }
+
+  STATE._wizardMode = 'initial';
+  $('#wizard-overlay').classList.add('hidden');
+  buildFilterBar();
+  buildLeftSidebar();
+  buildGroupsSidebarSection();
+  syncControlsFromState();
+  applyViewModeUI();
+  renderGraphs();
+  buildChartBar();
+}
+
+/* ---------------- chart tabs ---------------- */
+function buildChartBar() {
+  const bar = $('#chart-bar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  STATE.charts.forEach((c, i) => {
+    const tab = el('div', {className: 'chart-tab' + (i === STATE.activeChart ? ' active' : ''), title: 'Click to open · double-click to rename'});
+    tab.appendChild(el('span', {textContent: c.name}));
+    if (STATE.charts.length > 1) {
+      const x = el('span', {className: 'ct-close', innerHTML: '&times;', title: 'Delete chart'});
+      x.addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm(`Delete "${c.name}"?`)) return;
+        STATE.charts.splice(i, 1);
+        if (STATE.activeChart >= STATE.charts.length) STATE.activeChart = STATE.charts.length - 1;
+        else if (i < STATE.activeChart) STATE.activeChart--;
+        applyChart(STATE.charts[STATE.activeChart]);
+        buildChartBar(); scheduleAutosave();
+      });
+      tab.appendChild(x);
+    }
+    tab.addEventListener('click', () => switchChart(i));
+    tab.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      const n = prompt('Chart name:', c.name);
+      if (n && n.trim()) { c.name = n.trim(); buildChartBar(); scheduleAutosave(); }
+    });
+    bar.appendChild(tab);
+  });
+
+  const actions = el('div', {className: 'cb-actions'});
+  const cur = STATE.charts[STATE.activeChart];
+  const ds = cur && STATE.datasets[cur.datasetId];
+  if (ds) {
+    actions.appendChild(el('span', {
+      style: 'font-size:10px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;',
+      title: 'Data source for this chart: ' + ds.name,
+      textContent: '⛁ ' + ds.name
+    }));
+  }
+  actions.appendChild(el('button', {className: 'sm', textContent: '+ New', title: 'New chart, same data', onClick: () => newChart(false)}));
+  actions.appendChild(el('button', {className: 'sm', textContent: '⧉ Duplicate', title: 'Copy this chart', onClick: () => newChart(true)}));
+  actions.appendChild(el('button', {className: 'sm', textContent: '+ New from data…', title: 'New chart from a different file or table', onClick: () => startWizard('newchart')}));
+  actions.appendChild(el('button', {className: 'sm', textContent: '⇄ Replace data…', title: 'Point this chart at a different file or table', onClick: () => {
+    if (confirm('Replace the data behind "' + cur.name + '"?\n\nStyling, groups and text boxes are kept. Filters and node positions reset.')) startWizard('swap');
+  }}));
+  actions.appendChild(el('button', {className: 'sm', textContent: '💾 Save Session', title: 'Download all charts as a file', onClick: saveSessionFile}));
+  actions.appendChild(el('button', {className: 'sm', textContent: '📂 Load Session', onClick: () => $('#session-file-input').click()}));
+  actions.appendChild(el('span', {id: 'autosave-note'}));
+  bar.appendChild(actions);
+}
+
+function switchChart(idx) {
+  if (idx === STATE.activeChart) return;
+  STATE.charts[STATE.activeChart] = captureChart(STATE.charts[STATE.activeChart].name);
+  STATE.activeChart = idx;
+  applyChart(STATE.charts[idx]);
+  buildChartBar();
+  scheduleAutosave();
+}
+
+function newChart(duplicate) {
+  STATE.charts[STATE.activeChart] = captureChart(STATE.charts[STATE.activeChart].name);
+  const base = duplicate ? clone(STATE.charts[STATE.activeChart]) : clone(STATE._pristine);
+  base.name = `Chart ${STATE.charts.length + 1}`;
+  if (!duplicate) base.datasetId = STATE.activeDataset;
+  STATE.charts.push(base);
+  STATE.activeChart = STATE.charts.length - 1;
+  applyChart(base);
+  buildChartBar();
+  scheduleAutosave();
+}
+
+/* ---------------- session file ---------------- */
+function buildSession() {
+  STATE.charts[STATE.activeChart] = captureChart(STATE.charts[STATE.activeChart].name);
+  const used = new Set(STATE.charts.map(c => c.datasetId));
+  return {
+    version: 2,
+    savedAt: new Date().toISOString(),
+    datasets: Object.values(STATE.datasets).filter(d => used.has(d.id)),
+    charts: STATE.charts,
+    activeChart: STATE.activeChart,
+  };
+}
+
+function saveSessionFile() {
+  const blob = new Blob([JSON.stringify(buildSession())], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const base = (STATE.fileName || 'trace').replace(/\.[^.]+$/, '');
+  a.download = `${base}_${new Date().toISOString().slice(0,10)}.trace.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function loadSession(session) {
+  if (!session || (!session.rawData && !session.datasets)) { alert('That file is not a TRACE session.'); return; }
+  showLoading('Restoring session…');
+  try {
+    STATE.datasets = {};
+    if (session.datasets && session.datasets.length) {
+      session.datasets.forEach(d => { STATE.datasets[d.id] = d; });
+    } else {
+      const id = 'ds_1';
+      STATE.datasets[id] = {
+        id, name: session.fileName || 'Dataset 1', fileName: session.fileName || '',
+        headers: session.headers || Object.keys(session.rawData[0] || {}),
+        mapping: session.mapping || {}, dataShape: session.dataShape || 'fromto',
+        rawData: session.rawData,
+      };
+      (session.charts || []).forEach(c => { c.datasetId = id; });
+    }
+    STATE._datasetCounter = Object.keys(STATE.datasets).length;
+
+    STATE.charts = (session.charts && session.charts.length) ? session.charts : [];
+    STATE.activeChart = Math.min(session.activeChart || 0, Math.max(STATE.charts.length - 1, 0));
+
+    const firstId = (STATE.charts[STATE.activeChart] || {}).datasetId || Object.keys(STATE.datasets)[0];
+    activateDataset(firstId);
+
+    if (!$('#app-container').classList.contains('active')) launchApp();
+    STATE._pristine = STATE._pristine || captureChart('Chart 1');
+    if (!STATE.charts.length) STATE.charts = [captureChart('Chart 1')];
+
+    applyChart(STATE.charts[STATE.activeChart]);
+    buildChartBar();
+  } catch (err) {
+    console.error(err);
+    alert('Could not restore session: ' + err.message);
+  }
+  hideLoading();
+}
+
+function handleSessionFile(file) {
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = e => {
+    try { loadSession(JSON.parse(e.target.result)); }
+    catch (err) { alert('Invalid session file: ' + err.message); }
+  };
+  r.readAsText(file);
+}
+
+/* ---------------- autosave ---------------- */
+let _autosaveWarned = false;
+const scheduleAutosave = debounce(() => {
+  if (!STATE.charts || !STATE.charts.length) return;
+  try {
+    const json = JSON.stringify(buildSession());
+    if (json.length > 4_500_000) {
+      if (!_autosaveWarned) {
+        _autosaveWarned = true;
+        const n = $('#autosave-note');
+        if (n) n.textContent = '⚠ too large to autosave — use Save Session';
+      }
+      return;
+    }
+    localStorage.setItem(AUTOSAVE_KEY, json);
+    const n = $('#autosave-note');
+    if (n) n.textContent = 'autosaved ' + new Date().toLocaleTimeString();
+  } catch (err) {
+    const n = $('#autosave-note');
+    if (n) n.textContent = '⚠ autosave failed — use Save Session';
+  }
+}, 1500);
+
+function checkAutosave() {
+  let raw;
+  try { raw = localStorage.getItem(AUTOSAVE_KEY); } catch (e) { return; }
+  if (!raw) return;
+  let s;
+  try { s = JSON.parse(raw); } catch (e) { return; }
+  const when = s.savedAt ? new Date(s.savedAt).toLocaleString() : 'unknown time';
+  const count = (s.charts || []).length;
+  const banner = el('div', {style: 'margin-bottom:16px;padding:10px 12px;background:var(--bg-tertiary);border:1px solid var(--accent);border-radius:var(--radius);display:flex;align-items:center;gap:12px;flex-wrap:wrap;'});
+  banner.appendChild(el('span', {style: 'font-size:12px;flex:1', textContent: `Unsaved work found: ${count} chart(s) from ${s.fileName || 'a previous session'}, ${when}.`}));
+  banner.appendChild(el('button', {className: 'primary sm', textContent: 'Restore', onClick: () => loadSession(s)}));
+  banner.appendChild(el('button', {className: 'sm', textContent: 'Discard', onClick: () => { localStorage.removeItem(AUTOSAVE_KEY); banner.remove(); }}));
+  const card = $('#wizard-card');
+  if (card) card.insertBefore(banner, card.firstChild.nextSibling.nextSibling);
+}
+
+/* ==========================================================================
    INIT
    ========================================================================== */
 function init() {
   buildDOM();
+  $('#session-file-input').addEventListener('change', e => {
+    if (e.target.files[0]) handleSessionFile(e.target.files[0]);
+    e.target.value = '';
+  });
   showUploadStep();
 }
 
