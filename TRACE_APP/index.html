@@ -231,7 +231,10 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 .context-menu-item { padding: 6px 12px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .context-menu-item:hover { background: var(--accent-dim); color: #fff; }
 .context-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
-.shift-selected-label { position:fixed; background:#f0a500; color:#000; font-size:10px; font-weight:700; padding:2px 7px; border-radius:8px; pointer-events:none; z-index:300; transform:translate(-50%,-110%); }
+#selection-badge { position:absolute; bottom:28px; left:12px; z-index:70; background:var(--accent-dim); border:1px solid var(--accent); color:#fff; font-size:11px; font-weight:600; padding:3px 10px; border-radius:12px; display:none; align-items:center; gap:8px; box-shadow:var(--shadow); }
+#selection-badge.active { display:flex; }
+#selection-badge .sb-clear { cursor:pointer; opacity:0.75; font-size:13px; }
+#selection-badge .sb-clear:hover { opacity:1; }
 
 /* Tooltip */
 .graph-tooltip { position: absolute; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 11px; pointer-events: none; z-index: 200; max-width: 300px; box-shadow: var(--shadow); }
@@ -477,8 +480,8 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   dbHost: '',
   groups: new Map(),
   _groupCounter: 0,
-  shiftSelected: new Set(),
   _persistentPositions: {},
+  _syncingSelection: false,
   _skipPositionRestore: false,
   layoutName: 'fcose',
   layoutRootEntity: null,
@@ -771,11 +774,12 @@ function buildDOM() {
           <div class="graph-divider" id="graph-divider" style="display:none"></div>
           <div class="cy-container" id="cy-summary-wrap"><div class="cy-canvas" id="cy-summary"></div><div class="cy-close" id="close-summary" title="Close">&times;</div></div>
         </div>
+        <div id="selection-badge"><span id="sb-text"></span><span class="sb-clear" id="sb-clear" title="Clear selection">&times;</span></div>
         <div id="graph-hints" style="position:absolute;bottom:0;left:0;right:0;z-index:60;padding:4px 12px;background:rgba(22,27,34,0.85);border-top:1px solid var(--border);font-size:10px;color:var(--text-muted);display:flex;gap:16px;pointer-events:none;">
-          <span> Left Click node to highlight</span>
-          <span> Shift+Left Click to mark for grouping</span>
-          <span> Drag box to multi-select → drag to move together</span>
-          <span> Right-click for options</span>
+          <span>Click to select &amp; highlight</span>
+          <span>Shift+Click to add / remove</span>
+          <span>Drag a box to select many</span>
+          <span>Right-click acts on the whole selection</span>
           <span>Esc to clear</span>
         </div>
         <div id="detail-panel"><div class="detail-header"><strong id="detail-title">Details</strong><button class="icon-btn" id="detail-close">&times;</button></div><div class="detail-body" id="detail-body"></div></div>
@@ -2755,16 +2759,24 @@ function getCyStyle() {
       }
     },
     {
-      selector: 'node.shift-selected',
-      style: { 'border-color': '#f0a500', 'border-width': 4, 'border-style': 'solid', 'z-index': 15 }
+      selector: 'node:selected',
+      style: {
+        'border-color': '#f0a500',
+        'border-width': 5,
+        'border-style': 'solid',
+        'overlay-color': '#f0a500',
+        'overlay-opacity': 0.12,
+        'z-index': 25
+      }
     },
     {
-      selector: ':selected',
+      selector: 'edge:selected',
       style: {
-        'border-color': '#79c0ff',
-        'border-width': 4,
-        'line-color': '#79c0ff',
-        'target-arrow-color': '#79c0ff'
+        'line-color': '#f0a500',
+        'target-arrow-color': '#f0a500',
+        'overlay-color': '#f0a500',
+        'overlay-opacity': 0.12,
+        'z-index': 25
       }
     }
   ];
@@ -2839,43 +2851,42 @@ function renderCy(container, elements, mode) {
   });
   cy.on('mouseout', () => { tooltip.style.display = 'none'; });
 
-// Click node: Shift+Click = toggle orange outline for grouping; normal click = highlight
+  // remember whether an element was already selected before this tap
+  cy.on('tapstart', 'node, edge', e => { e.target.scratch('_wasSel', e.target.selected()); });
+
+  // Click = select only this. Shift+Click = add / remove.
   cy.on('tap', 'node', e => {
     const node = e.target;
-    if (e.originalEvent && e.originalEvent.shiftKey) {
-      // Toggle orange "pending group" outline
-      if (STATE.shiftSelected.has(node.id())) {
-        STATE.shiftSelected.delete(node.id());
-        node.removeClass('shift-selected');
-      } else {
-        STATE.shiftSelected.add(node.id());
-        node.addClass('shift-selected');
-      }
-      // Don't change dimming — just the outline
+    const additive = e.originalEvent && (e.originalEvent.shiftKey || e.originalEvent.metaKey || e.originalEvent.ctrlKey);
+    if (additive) {
+      if (node.scratch('_wasSel')) node.unselect(); else node.select();
     } else {
-      // Normal click: clear all shift selections and do standard highlight
-      STATE.shiftSelected.forEach(id => cy.getElementById(id).removeClass('shift-selected'));
-      STATE.shiftSelected.clear();
-      cy.elements().removeClass('highlighted dimmed');
-      cy.elements().addClass('dimmed');
-      node.removeClass('dimmed').addClass('highlighted');
-      node.connectedEdges().removeClass('dimmed').addClass('highlighted');
-      node.neighborhood('node').removeClass('dimmed').addClass('highlighted');
-      STATE.selectedElements = new Set([node.id()]);
+      cy.elements().not(node).unselect();
+      node.select();
     }
+    syncSelection(cy);
+    highlightSelection(cy);
   });
 
-  // Click edge -> show detail panel
+  // Click edge -> select it and show detail panel
   cy.on('tap', 'edge', e => {
-    showEdgeDetail(e.target.data(), mode);
+    const edge = e.target;
+    const additive = e.originalEvent && (e.originalEvent.shiftKey || e.originalEvent.metaKey || e.originalEvent.ctrlKey);
+    if (additive) {
+      if (edge.scratch('_wasSel')) edge.unselect(); else edge.select();
+    } else {
+      cy.elements().not(edge).unselect();
+      edge.select();
+    }
+    syncSelection(cy);
+    showEdgeDetail(edge.data(), mode);
   });
 
-// Click background -> clear
+  // Click background -> clear everything
   cy.on('tap', e => {
     if (e.target === cy) {
-      cy.elements().removeClass('highlighted dimmed anomaly-highlight path-highlight shift-selected');
-      STATE.selectedElements.clear();
-      STATE.shiftSelected.clear();
+      cy.elements().removeClass('highlighted dimmed anomaly-highlight path-highlight');
+      clearSelection();
       hideDetailPanel();
     }
   });
@@ -2887,10 +2898,12 @@ function renderCy(container, elements, mode) {
     if (e.target === cy) hideContextMenu();
   });
 
-  // Selection tracking
-  cy.on('select', 'node, edge', () => {
-    STATE.selectedElements = new Set(cy.$(':selected').map(ele => ele.id()));
+  // Selection tracking (covers box-select, which fires without a tap)
+  cy.on('select unselect', 'node, edge', () => {
+    if (STATE._syncingSelection) return;
+    syncSelection(cy);
   });
+  cy.on('boxend', () => { syncSelection(cy); highlightSelection(cy); });
 
   // Restore saved positions if available
 let positionsRestored = false;
@@ -2916,6 +2929,15 @@ if (!positionsRestored && (STATE.layoutName === 'radial' || STATE.layoutName ===
   }
 
 document.getElementById(container).style.background = STATE.bgColor;
+
+if (STATE.selectedElements && STATE.selectedElements.size) {
+  STATE._syncingSelection = true;
+  STATE.selectedElements.forEach(id => {
+    const e = cy.getElementById(id);
+    if (e.length) e.select();
+  });
+  STATE._syncingSelection = false;
+}
 
 return cy;
 }
@@ -3204,7 +3226,78 @@ function hideDetailPanel() {
 }
 
 
+/* ==========================================================================
+   UNIFIED SELECTION
+   ========================================================================== */
+function allCys() { return [STATE.cyDetail, STATE.cySummary].filter(Boolean); }
 
+/* ids of what's selected; pass 'node' or 'edge' to narrow */
+function selectedIds(kind) {
+  const cy = getActiveCy();
+  if (!cy) return [];
+  return cy.$((kind || '') + ':selected').map(e => e.id());
+}
+
+/* the ids a context-menu action should act on: the selection if the
+   right-clicked element is part of it, otherwise just that element */
+function actionTargets(target, kind) {
+  const sel = selectedIds(kind);
+  return (sel.length > 1 && sel.includes(target.id())) ? sel : [target.id()];
+}
+
+function updateSelectionBadge() {
+  const badge = $('#selection-badge');
+  if (!badge) return;
+  const n = selectedIds('node').length;
+  const e = selectedIds('edge').length;
+  if (n + e === 0) { badge.classList.remove('active'); return; }
+  const parts = [];
+  if (n) parts.push(`${n} ${n === 1 ? 'entity' : 'entities'}`);
+  if (e) parts.push(`${e} ${e === 1 ? 'link' : 'links'}`);
+  $('#sb-text').textContent = parts.join(' · ') + ' selected';
+  badge.classList.add('active');
+}
+
+/* mirror the selection into the other graph so side-by-side stays in step */
+function syncSelection(src) {
+  if (STATE._syncingSelection) return;
+  STATE._syncingSelection = true;
+  try {
+    STATE.selectedElements = new Set(src.$(':selected').map(e => e.id()));
+    allCys().forEach(cy => {
+      if (cy === src) return;
+      cy.batch(() => {
+        cy.elements().forEach(e => {
+          const want = STATE.selectedElements.has(e.id());
+          if (want && !e.selected()) e.select();
+          else if (!want && e.selected()) e.unselect();
+        });
+      });
+    });
+  } finally {
+    STATE._syncingSelection = false;
+  }
+  updateSelectionBadge();
+}
+
+function clearSelection() {
+  STATE._syncingSelection = true;
+  allCys().forEach(cy => cy.elements().unselect());
+  STATE._syncingSelection = false;
+  STATE.selectedElements.clear();
+  updateSelectionBadge();
+}
+
+/* dim everything except the selected nodes and their immediate neighbourhood */
+function highlightSelection(cy) {
+  cy.elements().removeClass('highlighted dimmed');
+  const sel = cy.$('node:selected');
+  if (sel.length === 0) return;
+  cy.elements().addClass('dimmed');
+  sel.removeClass('dimmed').addClass('highlighted');
+  sel.connectedEdges().removeClass('dimmed').addClass('highlighted');
+  sel.neighborhood('node').removeClass('dimmed').addClass('highlighted');
+}
 /* ==========================================================================
    CONTEXT MENU
    ========================================================================== */
@@ -3215,13 +3308,29 @@ function showContextMenu(event, target, type, cy) {
     menu.style.top = event.clientY + 'px';                                                                                                                          
                                                                                                                                                                     
 if (type === 'node') {
-      const selCount2 = STATE.shiftSelected.size;
-      if (selCount2 >= 2) {
-        const selIds = Array.from(STATE.shiftSelected).filter(id => !id.startsWith('__group__'));
+      // right-clicking outside the selection selects that node alone
+      if (!target.selected()) {
+        cy.elements().not(target).unselect();
+        target.select();
+        syncSelection(cy);
+      }
+      const targets = actionTargets(target, 'node');
+      const many = targets.length > 1;
+      const label = s => many ? `${s} (${targets.length})` : s;
+
+      if (many) {
+        menu.appendChild(el('div', {
+          style: 'padding:4px 12px;font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;',
+          textContent: `${targets.length} entities selected`
+        }));
+      }
+
+      const groupable = targets.filter(id => !id.startsWith('__group__'));
+      if (groupable.length >= 2) {
         menu.appendChild(el('div', {
           className: 'context-menu-item group-action',
-          innerHTML: `&#9632; Group ${selIds.length} selected entities`,
-          onClick: () => { hideContextMenu(); STATE.shiftSelected.forEach(id => { const n = getActiveCy(); if(n) n.getElementById(id).removeClass('shift-selected'); }); STATE.shiftSelected.clear(); openGroupModal(selIds); }
+          innerHTML: `&#9632; Group ${groupable.length} selected entities`,
+          onClick: () => { hideContextMenu(); openGroupModal(groupable); }
         }));
       }
       if (target.data('isGroup')) {
@@ -3292,10 +3401,10 @@ if (type === 'node') {
         menu.appendChild(el('div', {                                                                                                                                
           className: 'context-menu-item',                                                                                                                           
           innerHTML: `${currentShape === shape ? '&#10003; ' : '&nbsp;&nbsp;&nbsp;'}Shape: ${shapeLabels[shape]}`,                                                  
-          onClick: () => {                                                                                                                                          
-            hideContextMenu();                          
-            STATE.nodeShapes[target.id()] = shape;                                                                                                                  
-            renderGraphs();                                                                                                                                         
+          onClick: () => {
+            hideContextMenu();
+            targets.forEach(id => { STATE.nodeShapes[id] = shape; });
+            renderGraphs();
           }                                                                                                                                                         
         }));                                                                                                                                                        
       });                                                                                                                                                           
@@ -3303,15 +3412,16 @@ if (type === 'node') {
       menu.appendChild(el('div', {className: 'context-menu-divider'}));                                                                                             
       // Per-entity color
       const colorItem = el('div', {className: 'context-menu-item', style: 'display:flex;align-items:center;gap:8px;'});
-      colorItem.appendChild(el('span', {textContent: 'Node Color:'}));
+      colorItem.appendChild(el('span', {textContent: label('Node Color') + ':'}));
       const colorPick = el('input', {type: 'color', value: STATE.nodeColors[target.id()] || STATE.nodeColor, style: 'width:28px;height:20px;padding:0;border:1px solid var(--border);cursor:pointer;'});
-            colorPick.addEventListener('input', e => {
-        STATE.nodeColors[target.id()] = e.target.value;
-        target.data('hasCustomColor', true);
-        target.data('customColor', e.target.value);
-        [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
-          const n = cy.getElementById(target.id());
-          if (n.length) { n.data('hasCustomColor', true); n.data('customColor', e.target.value); }
+      colorPick.addEventListener('input', e => {
+        const v = e.target.value;
+        targets.forEach(id => {
+          STATE.nodeColors[id] = v;
+          allCys().forEach(c => {
+            const n = c.getElementById(id);
+            if (n.length) { n.data('hasCustomColor', true); n.data('customColor', v); }
+          });
         });
         if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
       });
@@ -3320,12 +3430,12 @@ if (type === 'node') {
       const colorReset = el('span', {textContent: '↺', style: 'cursor:pointer;font-size:14px;color:var(--text-muted);', title: 'Reset to default'});
       colorReset.addEventListener('click', e => {
         e.stopPropagation();
-        delete STATE.nodeColors[target.id()];
-        target.data('hasCustomColor', false);
-        target.data('customColor', '');
-        [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(cy => {
-          const n = cy.getElementById(target.id());
-                    if (n.length) { n.data('hasCustomColor', false); n.data('customColor', ''); }
+        targets.forEach(id => {
+          delete STATE.nodeColors[id];
+          allCys().forEach(c => {
+            const n = c.getElementById(id);
+            if (n.length) { n.data('hasCustomColor', false); n.data('customColor', ''); }
+          });
         });
         updateGraphStyles();
         if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
@@ -3342,7 +3452,7 @@ if (type === 'node') {
       nSlider.addEventListener('click', ev => ev.stopPropagation());
       nSlider.addEventListener('input', ev => {
         const v = parseFloat(ev.target.value);
-        const ids = STATE.shiftSelected.size > 1 ? Array.from(STATE.shiftSelected) : [target.id()];
+        const ids = targets;
         ids.forEach(id => { STATE.nodeSizes[id] = v; });
         nVal.textContent = Math.round(v);
         [STATE.cyDetail, STATE.cySummary].filter(Boolean).forEach(c => {
@@ -3353,7 +3463,7 @@ if (type === 'node') {
       const nSizeReset = el('span', {textContent: '↺', style: 'cursor:pointer;font-size:14px;color:var(--text-muted);', title: 'Back to automatic size'});
       nSizeReset.addEventListener('click', ev => {
         ev.stopPropagation();
-        const ids = STATE.shiftSelected.size > 1 ? Array.from(STATE.shiftSelected) : [target.id()];
+        const ids = targets;
         ids.forEach(id => delete STATE.nodeSizes[id]);
         applySizes();
       });
@@ -3381,10 +3491,10 @@ if (type === 'node') {
           const file = inp.files[0];                                                                                                                                
           if (!file) return;                                                                                                                                        
           const reader = new FileReader();                                                                                                                          
-          reader.onload = ev => {                                                                                                                                   
-            STATE.nodeIcons[target.id()] = ev.target.result;                                                                                                        
-            renderGraphs();                                                                                                                                         
-          };                                                                                                                                                        
+          reader.onload = ev => {
+            targets.forEach(id => { STATE.nodeIcons[id] = ev.target.result; });
+            renderGraphs();
+          };                                                                                                                                                      
           reader.readAsDataURL(file);                                                                                                                               
           inp.remove();                                                                                                                                             
         });                                                                                                                                                         
@@ -3394,23 +3504,23 @@ if (type === 'node') {
                                                                                                                                                                     
       // Remove icon (only if entity has one)                                                                                                                       
       if (STATE.nodeIcons[target.id()]) {
-        menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Remove Icon', onClick: () => {                                                    
-          hideContextMenu();                                                                                                                                        
-          delete STATE.nodeIcons[target.id()];                                                                                                                      
-          renderGraphs();                                                                                                                                           
-        }}));                                                                                                                                                       
+        menu.appendChild(el('div', {className: 'context-menu-item', textContent: label('Remove Icon'), onClick: () => {
+          hideContextMenu();
+          targets.forEach(id => { delete STATE.nodeIcons[id]; });
+          renderGraphs();
+        }}));                                                                                                                                                      
       }                                                                                                                                                             
                                                                                                                                                                     
       // Reset this entity to defaults (only if it has overrides)                                                                                                   
       if (STATE.nodeShapes[target.id()] || STATE.nodeIcons[target.id()] || STATE.nodeColors[target.id()] || STATE.nodeLabels[target.id()]) {
-        menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Reset Entity to Default', onClick: () => {                                        
-          hideContextMenu();                                                                                                                                        
-          delete STATE.nodeShapes[target.id()];                                                                                                                     
-          delete STATE.nodeIcons[target.id()];
-          delete STATE.nodeColors[target.id()];
-          delete STATE.nodeLabels[target.id()];                                                                                                                 
-          renderGraphs();                                                                                                                                           
-        }}));                                                                                                                                                       
+        menu.appendChild(el('div', {className: 'context-menu-item', textContent: label('Reset Entity to Default'), onClick: () => {
+          hideContextMenu();
+          targets.forEach(id => {
+            delete STATE.nodeShapes[id]; delete STATE.nodeIcons[id];
+            delete STATE.nodeColors[id]; delete STATE.nodeLabels[id]; delete STATE.nodeSizes[id];
+          });
+          renderGraphs();
+        }}));                                                                                                                                                      
       }                                                                                                                                                             
                                                                                                                                                                     
       menu.appendChild(el('div', {className: 'context-menu-divider'}));                                                                                             
@@ -3429,9 +3539,13 @@ if (type === 'node') {
     }                                                                                                                                                               
                                                                                                                                                                     
     if (type === 'edge') {
+      if (!target.selected()) {
+        cy.elements().not(target).unselect();
+        target.select();
+        syncSelection(cy);
+      }
       const eid = target.id();
-      const selEdges = cy.$('edge:selected');
-      const applyTo = selEdges.length > 1 ? selEdges.map(e => e.id()) : [eid];
+      const applyTo = actionTargets(target, 'edge');
 
       const colorItem = el('div', {className: 'context-menu-item', style: 'display:flex;align-items:center;gap:8px;'});
       colorItem.appendChild(el('span', {textContent: applyTo.length > 1 ? `Link Color (${applyTo.length}):` : 'Link Color:'}));
@@ -4366,6 +4480,11 @@ async function saveAsPNG() {
 function bindGlobalEvents() {
   // Close buttons
   $('#detail-close').addEventListener('click', hideDetailPanel);
+  $('#sb-clear').addEventListener('click', () => {
+    const cy = getActiveCy();
+    if (cy) cy.elements().removeClass('highlighted dimmed');
+    clearSelection();
+  });
 $('#timeline-close').addEventListener('click', () => {
     STATE.viewMode = 'detail';
     $$('.view-toggle button').forEach(b => b.classList.toggle('active', b.dataset.view === 'detail'));
@@ -4418,6 +4537,7 @@ bindTimelineResizer();
       $('#edge-label-modal').classList.remove('active');
       const cy = getActiveCy();
       if (cy) cy.elements().removeClass('highlighted dimmed tl-dimmed anomaly-highlight path-highlight tl-current tl-played');
+      clearSelection();
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       const cy = getActiveCy();
