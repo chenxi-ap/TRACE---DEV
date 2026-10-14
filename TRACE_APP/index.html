@@ -236,6 +236,21 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 #selection-badge .sb-clear { cursor:pointer; opacity:0.75; font-size:13px; }
 #selection-badge .sb-clear:hover { opacity:1; }
 
+/* QC Panel */
+#qc-panel { position:absolute; top:0; right:0; width:340px; height:100%; background:var(--bg-secondary); border-left:1px solid var(--border); z-index:55; overflow-y:auto; display:none; box-shadow:-4px 0 12px rgba(0,0,0,0.3); }
+#qc-panel.active { display:block; }
+#qc-panel .qc-header { display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg-secondary); z-index:2; }
+.qc-section { padding:10px 12px; border-bottom:1px solid var(--border); }
+.qc-section h4 { font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin-bottom:8px; }
+.qc-row { display:flex; justify-content:space-between; gap:10px; padding:3px 0; font-size:12px; }
+.qc-row .k { color:var(--text-secondary); }
+.qc-row .v { font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.qc-row.warn .v { color:var(--orange); }
+.qc-row.bad .v { color:var(--red); }
+.qc-row.ok .v { color:var(--green); }
+.qc-note { font-size:10px; color:var(--text-muted); margin-top:6px; line-height:1.5; }
+.qc-rows-link { color:var(--accent); cursor:pointer; text-decoration:underline dotted; }
+
 /* Tooltip */
 .graph-tooltip { position: absolute; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; font-size: 11px; pointer-events: none; z-index: 200; max-width: 300px; box-shadow: var(--shadow); }
 .graph-tooltip .tt-title { font-weight: 600; margin-bottom: 4px; }
@@ -405,6 +420,7 @@ const STATE = {
   headers: [],          // Column headers
   mapping: {},          // Column mapping {from, to, amount, date, time, desc, type}
   transactions: [],     // Processed transaction objects
+  qc: null,             // import diagnostics
   entities: new Map(),  // entity name -> {txnCount, totalIn, totalOut, ...}
   entityPairs: new Map(), // "from->to" -> {count, total, txns[]}
   cyDetail: null,       // Cytoscape instance (detail)
@@ -775,14 +791,17 @@ function buildDOM() {
           <div class="cy-container" id="cy-summary-wrap"><div class="cy-canvas" id="cy-summary"></div><div class="cy-close" id="close-summary" title="Close">&times;</div></div>
         </div>
         <div id="selection-badge"><span id="sb-text"></span><span class="sb-clear" id="sb-clear" title="Clear selection">&times;</span></div>
-        <div id="graph-hints" style="position:absolute;bottom:0;left:0;right:0;z-index:60;padding:4px 12px;background:rgba(22,27,34,0.85);border-top:1px solid var(--border);font-size:10px;color:var(--text-muted);display:flex;gap:16px;pointer-events:none;">
-          <span>Click to select &amp; highlight</span>
-          <span>Shift+Click to add / remove</span>
-          <span>Drag a box to select many</span>
-          <span>Right-click acts on the whole selection</span>
-          <span>Esc to clear</span>
+        <div id="graph-hints" style="position:absolute;bottom:0;left:0;right:0;z-index:60;padding:5px 12px;background:rgba(22,27,34,0.9);border-top:1px solid var(--border);font-size:11px;color:#ffffff;display:flex;gap:18px;pointer-events:none;">
+          <span><b>Click</b> select</span>
+          <span><b>Shift+Click</b> add / remove</span>
+          <span><b>Shift+Drag</b> box-select</span>
+          <span><b>Drag</b> background to pan</span>
+          <span><b>Right-click</b> options (applies to selection)</span>
+          <span><b>Select 2+ → right-click → Group</b></span>
+          <span><b>Esc</b> clear</span>
         </div>
         <div id="detail-panel"><div class="detail-header"><strong id="detail-title">Details</strong><button class="icon-btn" id="detail-close">&times;</button></div><div class="detail-body" id="detail-body"></div></div>
+        <div id="qc-panel"><div class="qc-header"><strong>QC / Reconciliation</strong><span><button class="sm" id="qc-copy" title="Copy all figures">Copy</button> <button class="icon-btn" id="qc-close">&times;</button></span></div><div id="qc-body"></div></div>
       </div>
       <div id="right-sidebar"></div>
     </div>
@@ -1270,6 +1289,14 @@ function processData() {
   STATE.transactions = [];
   STATE.entities = new Map();
   STATE.entityPairs = new Map();
+  const qc = {
+    rowsIn: STATE.rawData.length,
+    droppedNoParty: 0, droppedRows: [],
+    badAmount: 0, badAmountRows: [],
+    badDate: 0, badDateRows: [],
+    blankFrom: 0, blankTo: 0,
+    negatives: 0,
+  };
 
   STATE.rawData.forEach((row, idx) => {                                                                                                                             
     const amount = m.amount ? parseAmount(row[m.amount]) : null;                                                                                                    
@@ -1277,20 +1304,32 @@ function processData() {
     if (STATE.dataShape === 'entity') {                                                                                                                             
       const entity = String(row[m.entity] || '').trim();                                                                                                            
       const counterparty = String(row[m.counterparty] || '').trim();                                                                                                
-      if (!entity && !counterparty) return;                                                                                                                         
+      if (!entity && !counterparty) { qc.droppedNoParty++; if (qc.droppedRows.length < 50) qc.droppedRows.push(idx + 2); return; }                                                                                                                        
       if (amount != null && amount < 0) { from = entity; to = counterparty; }                                                                                       
       else                              { from = counterparty; to = entity; }                                                                                       
     } else {                                                                                                                                                        
       from = String(row[m.from] || '').trim();                                                                                                                      
       to = String(row[m.to] || '').trim();                                                                                                                          
-      if (!from && !to) return;                                                                                                                                     
+      if (!from && !to) { qc.droppedNoParty++; if (qc.droppedRows.length < 50) qc.droppedRows.push(idx + 2); return; }                                                                                                                                    
     }                                                                                                                                                               
-    const txn = {                                                                                                                                                   
-      id: idx,                                                                                                                                                      
-      from: from || 'Unknown',                                                                                                                                      
-      to: to || 'Unknown',                                                                                                                                          
+    if (!from) qc.blankFrom++;
+    if (!to) qc.blankTo++;
+    if (m.amount) {
+      const rawAmt = row[m.amount];
+      const hasText = rawAmt != null && String(rawAmt).trim() !== '';
+      if (amount == null && hasText) { qc.badAmount++; if (qc.badAmountRows.length < 50) qc.badAmountRows.push(idx + 2); }
+      else if (amount == null) { qc.badAmount++; if (qc.badAmountRows.length < 50) qc.badAmountRows.push(idx + 2); }
+      else if (amount < 0) qc.negatives++;
+    }
+    const parsedDate = m.date ? parseDate(row[m.date]) : null;
+    if (m.date && !parsedDate) { qc.badDate++; if (qc.badDateRows.length < 50) qc.badDateRows.push(idx + 2); }
+
+    const txn = {
+      id: idx,
+      from: from || 'Unknown',
+      to: to || 'Unknown',
       amount: amount,
-      date: m.date ? parseDate(row[m.date]) : null,
+      date: parsedDate,
       time: m.time ? String(row[m.time] || '') : '',
       desc: m.desc ? String(row[m.desc] || '') : '',
       type: m.type ? String(row[m.type] || '') : '',
@@ -1332,6 +1371,9 @@ function processData() {
     STATE.filters.amountMin = Math.min(...amounts);
     STATE.filters.amountMax = Math.max(...amounts);
   }
+
+  qc.rowsUsed = STATE.transactions.length;
+  STATE.qc = qc;
 
   runAnomalyDetection();
   hideLoading();
@@ -1583,6 +1625,7 @@ function buildTopbar() {
     <button id="btn-summary">Summary</button>
     <button id="btn-export" class="primary">Export PDF</button>
     <button id="btn-anomaly-toggle" title="Toggle Findings Panel">Findings (${STATE.anomalies.length})</button>
+    <button id="btn-qc" title="Reconcile against your source file">QC</button>
     <div class="topbar-divider"></div>
     <button id="btn-new-chart" title="Clear everything and start over">New Session</button>
     <button id="btn-save" title="Save current chart as image">Save PNG</button>
@@ -1663,6 +1706,13 @@ function buildTopbar() {
     }
   });
   $('#btn-save').addEventListener('click', saveAsPNG);
+  $('#btn-qc').addEventListener('click', () => {
+    const p = $('#qc-panel');
+    if (p.classList.contains('active')) { p.classList.remove('active'); return; }
+    hideDetailPanel();
+    p.classList.add('active');
+    renderQCPanel();
+  });
 }
 
 
@@ -2851,15 +2901,19 @@ function renderCy(container, elements, mode) {
   });
   cy.on('mouseout', () => { tooltip.style.display = 'none'; });
 
-  // remember whether an element was already selected before this tap
-  cy.on('tapstart', 'node, edge', e => { e.target.scratch('_wasSel', e.target.selected()); });
+  // snapshot the selection BEFORE cytoscape handles the click
+  // (capture phase runs ahead of cytoscape's own mousedown listener)
+  let _preTapSel = new Set();
+  document.getElementById(container).addEventListener('mousedown', () => {
+    _preTapSel = new Set(cy.$(':selected').map(x => x.id()));
+  }, true);
 
   // Click = select only this. Shift+Click = add / remove.
   cy.on('tap', 'node', e => {
     const node = e.target;
     const additive = e.originalEvent && (e.originalEvent.shiftKey || e.originalEvent.metaKey || e.originalEvent.ctrlKey);
     if (additive) {
-      if (node.scratch('_wasSel')) node.unselect(); else node.select();
+      if (_preTapSel.has(node.id())) node.unselect(); else node.select();
     } else {
       cy.elements().not(node).unselect();
       node.select();
@@ -2873,7 +2927,7 @@ function renderCy(container, elements, mode) {
     const edge = e.target;
     const additive = e.originalEvent && (e.originalEvent.shiftKey || e.originalEvent.metaKey || e.originalEvent.ctrlKey);
     if (additive) {
-      if (edge.scratch('_wasSel')) edge.unselect(); else edge.select();
+      if (_preTapSel.has(edge.id())) edge.unselect(); else edge.select();
     } else {
       cy.elements().not(edge).unselect();
       edge.select();
@@ -2999,6 +3053,7 @@ function renderGraphs() {
   buildRightSidebar();
   renderAllAnnotations();
   if (STATE.showTimeline) renderTimeline(txns);
+  if ($('#qc-panel') && $('#qc-panel').classList.contains('active')) renderQCPanel();
   if (STATE.charts && STATE.charts.length) {
     STATE.charts[STATE.activeChart] = captureChart(STATE.charts[STATE.activeChart].name);
     scheduleAutosave();
@@ -3250,12 +3305,17 @@ function updateSelectionBadge() {
   if (!badge) return;
   const n = selectedIds('node').length;
   const e = selectedIds('edge').length;
-  if (n + e === 0) { badge.classList.remove('active'); return; }
+  if (n + e === 0) {
+    badge.classList.remove('active');
+    if ($('#qc-panel') && $('#qc-panel').classList.contains('active')) renderQCPanel();
+    return;
+  }
   const parts = [];
   if (n) parts.push(`${n} ${n === 1 ? 'entity' : 'entities'}`);
   if (e) parts.push(`${e} ${e === 1 ? 'link' : 'links'}`);
   $('#sb-text').textContent = parts.join(' · ') + ' selected';
   badge.classList.add('active');
+  if ($('#qc-panel') && $('#qc-panel').classList.contains('active')) renderQCPanel();
 }
 
 /* mirror the selection into the other graph so side-by-side stays in step */
@@ -3332,6 +3392,13 @@ if (type === 'node') {
           innerHTML: `&#9632; Group ${groupable.length} selected entities`,
           onClick: () => { hideContextMenu(); openGroupModal(groupable); }
         }));
+      } else if (groupable.length === 1) {
+        menu.appendChild(el('div', {
+          className: 'context-menu-item group-action',
+          innerHTML: '&#9632; Create group from here…',
+          title: 'Opens the group editor with this entity added — pick the rest there, or Shift+Click more entities first',
+          onClick: () => { hideContextMenu(); openGroupModal(groupable); }
+        }));
       }
       if (target.data('isGroup')) {
         menu.appendChild(el('div', {
@@ -3400,7 +3467,7 @@ if (type === 'node') {
       ['ellipse', 'rectangle', 'diamond', 'triangle'].forEach(shape => {                                                                                            
         menu.appendChild(el('div', {                                                                                                                                
           className: 'context-menu-item',                                                                                                                           
-          innerHTML: `${currentShape === shape ? '&#10003; ' : '&nbsp;&nbsp;&nbsp;'}Shape: ${shapeLabels[shape]}`,                                                  
+          innerHTML: `${currentShape === shape ? '&#10003; ' : '&nbsp;&nbsp;&nbsp;'}${label('Shape: ' + shapeLabels[shape])}`,                                                  
           onClick: () => {
             hideContextMenu();
             targets.forEach(id => { STATE.nodeShapes[id] = shape; });
@@ -3481,7 +3548,7 @@ if (type === 'node') {
       }
 
       // Upload icon for this specific entity                                                                                                                       
-      menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Upload Icon...', onClick: () => {
+      menu.appendChild(el('div', {className: 'context-menu-item', textContent: label('Upload Icon') + '...', onClick: () => {
         hideContextMenu();                                                                                                                                          
         const inp = document.createElement('input');                                                                                                                
         inp.type = 'file';                                                                                                                                          
@@ -4479,8 +4546,11 @@ async function saveAsPNG() {
    ========================================================================== */
 function bindGlobalEvents() {
   // Close buttons
-  $('#detail-close').addEventListener('click', hideDetailPanel);
-  $('#sb-clear').addEventListener('click', () => {
+  $('#detail-close').addEventListener('click', hideDetailPanel);  $('#detail-close').addEventListener('click', hideDetailPanel);
+  $('#qc-close').addEventListener('click', () => $('#qc-panel').classList.remove('active'));
+  $('#qc-copy').addEventListener('click', () => {
+    navigator.clipboard.writeText(qcPanelText()).then(() => alert('QC figures copied.'));
+  });  $('#sb-clear').addEventListener('click', () => {
     const cy = getActiveCy();
     if (cy) cy.elements().removeClass('highlighted dimmed');
     clearSelection();
@@ -4768,7 +4838,7 @@ function buildGroupsSidebarSection() {
     });
   }
   header.addEventListener('click', e => { if (e.target.tagName === 'BUTTON') return; body.classList.toggle('collapsed'); header.querySelector('.chevron').classList.toggle('collapsed'); });
-  const hint = el('div', {style: 'font-size:10px;color:var(--text-muted);padding:4px 12px 8px;line-height:1.6', innerHTML: '&#9432; Shift+Click nodes to outline, then right-click → Group'});
+  const hint = el('div', {style: 'font-size:10px;color:var(--text-muted);padding:4px 12px 8px;line-height:1.6', innerHTML: '&#9432; Select entities (Shift+Click or Shift+Drag), then right-click → Group. Or use + New above.'});
   section.appendChild(header); section.appendChild(hint); section.appendChild(body);
   const firstSection = sb.querySelector('.sidebar-section');
   if (firstSection) sb.insertBefore(section, firstSection); else sb.appendChild(section);
@@ -5097,6 +5167,165 @@ function renderAllAnnotations() {
   const container = document.getElementById('graph-area');
   if (!container) return;
   STATE.annotations.forEach(ann => renderAnnotation(ann, container));
+}
+
+
+/* ==========================================================================
+   QC / RECONCILIATION PANEL
+   ========================================================================== */
+function sumTxns(txns) {
+  let total = 0, missing = 0;
+  txns.forEach(t => { if (t.amount == null) missing++; else total += Math.abs(t.amount); });
+  return {total, missing, count: txns.length};
+}
+
+function qcSelectionStats() {
+  const cy = getActiveCy();
+  if (!cy) return null;
+  const nodeIds = selectedIds('node');
+  const edgeIds = selectedIds('edge');
+  if (!nodeIds.length && !edgeIds.length) return null;
+
+  const txns = [];
+  const seen = new Set();
+  edgeIds.forEach(id => {
+    const e = cy.getElementById(id);
+    if (!e.length) return;
+    const d = e.data();
+    if (d.txns) d.txns.forEach(t => { if (!seen.has(t.id)) { seen.add(t.id); txns.push(t); } });
+    else if (d.txnId != null) {
+      const t = STATE.transactions.find(x => x.id === d.txnId);
+      if (t && !seen.has(t.id)) { seen.add(t.id); txns.push(t); }
+    }
+  });
+
+  const entSet = new Set();
+  nodeIds.forEach(id => {
+    if (id.startsWith('__group__')) {
+      const g = STATE.groups.get(id.replace('__group__', ''));
+      if (g) g.members.forEach(m => entSet.add(m));
+    } else entSet.add(id);
+  });
+
+  let nodeIn = 0, nodeOut = 0, nodeCount = 0;
+  if (entSet.size) {
+    getFilteredTransactions().forEach(t => {
+      const f = entSet.has(t.from), o = entSet.has(t.to);
+      if (!f && !o) return;
+      nodeCount++;
+      const amt = Math.abs(t.amount || 0);
+      if (o) nodeIn += amt;
+      if (f) nodeOut += amt;
+    });
+  }
+  return {
+    nodeIds, edgeIds, entCount: entSet.size,
+    edgeStats: sumTxns(txns),
+    nodeIn, nodeOut, nodeCount,
+  };
+}
+
+function renderQCPanel() {
+  const body = $('#qc-body');
+  if (!body) return;
+  const qc = STATE.qc || {};
+  const all = STATE.transactions;
+  const filt = getFilteredTransactions();
+  const allS = sumTxns(all), filtS = sumTxns(filt);
+  const isFiltered = filt.length !== all.length;
+
+  const row = (k, v, cls) => `<div class="qc-row ${cls || ''}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const n = x => (x || 0).toLocaleString();
+  const money = x => '$' + (Math.round((x || 0) * 100) / 100).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  let html = '';
+
+  // --- import ---
+  html += `<div class="qc-section"><h4>Import — ${escHtml(STATE.fileName || 'data')}</h4>`;
+  html += row('Rows in source', n(qc.rowsIn));
+  html += row('Rows charted', n(qc.rowsUsed), qc.rowsUsed === qc.rowsIn ? 'ok' : 'warn');
+  if (qc.droppedNoParty) {
+    html += row('Dropped (no entity names)', n(qc.droppedNoParty), 'bad');
+    html += `<div class="qc-note">Rows with both party columns blank are not charted. First offending row numbers: ${qc.droppedRows.slice(0,15).join(', ')}${qc.droppedRows.length > 15 ? '…' : ''}</div>`;
+  }
+  html += `</div>`;
+
+  // --- data quality ---
+  if (qc.badAmount || qc.badDate || qc.blankFrom || qc.blankTo || qc.negatives) {
+    html += `<div class="qc-section"><h4>Data quality</h4>`;
+    if (qc.badAmount) {
+      html += row('Unreadable amounts', n(qc.badAmount), 'bad');
+      html += `<div class="qc-note">These transactions are charted but count as $0 in every total, so sums will be short. Rows: ${qc.badAmountRows.slice(0,15).join(', ')}${qc.badAmountRows.length > 15 ? '…' : ''}</div>`;
+    }
+    if (qc.badDate) {
+      html += row('Unreadable dates', n(qc.badDate), 'warn');
+      html += `<div class="qc-note">Excluded from the timeline and from date filtering. Rows: ${qc.badDateRows.slice(0,15).join(', ')}${qc.badDateRows.length > 15 ? '…' : ''}</div>`;
+    }
+    if (qc.blankFrom) html += row('Blank sender → "Unknown"', n(qc.blankFrom), 'warn');
+    if (qc.blankTo) html += row('Blank recipient → "Unknown"', n(qc.blankTo), 'warn');
+    if (qc.negatives) {
+      html += row('Negative amounts', n(qc.negatives), 'warn');
+      html += `<div class="qc-note">Totals use absolute values, so negatives add rather than subtract.</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // --- totals ---
+  html += `<div class="qc-section"><h4>Full dataset</h4>`;
+  html += row('Transactions', n(allS.count));
+  html += row('Sum of amounts', money(allS.total));
+  html += row('Entities', n(STATE.entities.size));
+  if (allS.missing) html += row('Without an amount', n(allS.missing), 'warn');
+  html += `</div>`;
+
+  if (isFiltered) {
+    html += `<div class="qc-section"><h4>After current filters</h4>`;
+    html += row('Transactions', n(filtS.count));
+    html += row('Sum of amounts', money(filtS.total));
+    html += row('Excluded by filters', n(allS.count - filtS.count), 'warn');
+    html += row('Amount excluded', money(allS.total - filtS.total), 'warn');
+    html += `</div>`;
+  }
+
+  // --- selection ---
+  const sel = qcSelectionStats();
+  html += `<div class="qc-section"><h4>Current selection</h4>`;
+  if (!sel) {
+    html += `<div class="qc-note">Select entities or links on the chart to total them here — useful for checking one relationship against a spreadsheet cell.</div>`;
+  } else {
+    if (sel.edgeIds.length) {
+      html += row(`Links selected`, n(sel.edgeIds.length));
+      html += row('Transactions in those links', n(sel.edgeStats.count));
+      html += row('Sum', money(sel.edgeStats.total));
+      if (sel.edgeStats.missing) html += row('Without an amount', n(sel.edgeStats.missing), 'warn');
+    }
+    if (sel.entCount) {
+      if (sel.edgeIds.length) html += `<div style="height:1px;background:var(--border);margin:8px 0"></div>`;
+      html += row('Entities selected', n(sel.entCount));
+      html += row('Transactions touching them', n(sel.nodeCount));
+      html += row('Total in', money(sel.nodeIn), 'ok');
+      html += row('Total out', money(sel.nodeOut), 'bad');
+      html += row('Net', money(sel.nodeIn - sel.nodeOut));
+    }
+    html += `<div class="qc-note">Entity totals are across the current filters. A transaction between two selected entities counts once toward in and once toward out.</div>`;
+  }
+  html += `</div>`;
+
+  html += `<div class="qc-section"><div class="qc-note">Figures here are unrounded regardless of the Round toggle, so they tie directly to a spreadsheet.</div></div>`;
+
+  body.innerHTML = html;
+}
+
+function qcPanelText() {
+  const body = $('#qc-body');
+  if (!body) return '';
+  return `TRACE QC — ${STATE.fileName || 'data'} — ${new Date().toLocaleString()}\n` +
+    Array.from(body.querySelectorAll('.qc-section')).map(sec => {
+      const h = sec.querySelector('h4');
+      const rows = Array.from(sec.querySelectorAll('.qc-row'))
+        .map(r => `  ${r.querySelector('.k').textContent}: ${r.querySelector('.v').textContent}`).join('\n');
+      return (h ? '\n' + h.textContent.toUpperCase() + '\n' : '') + rows;
+    }).join('\n');
 }
 
 /* ==========================================================================
