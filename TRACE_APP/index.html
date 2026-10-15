@@ -72,7 +72,8 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 .group-member-tag .rm:hover { opacity:1; }
 .group-node-badge { font-size:10px;color:#f0a500;background:rgba(240,165,0,0.12);border:1px solid rgba(240,165,0,0.35);border-radius:8px;padding:1px 6px;margin-left:4px; }
 .group-sidebar-item { background:var(--bg-tertiary);border:1px solid var(--border);border-left:3px solid #f0a500;border-radius:var(--radius);padding:8px 10px;margin-bottom:6px;font-size:12px; }
-.group-sidebar-item .gi-header { display:flex;align-items:center;justify-content:space-between;gap:6px; }
+.group-sidebar-item .gi-header { display:flex;align-items:center;justify-content:space-between;gap:4px;flex-wrap:wrap; }
+.group-sidebar-item .gi-header .sm { padding:2px 6px;font-size:10px; }
 .group-sidebar-item .gi-name { font-weight:600;color:#f0a500;flex:1; }
 .group-sidebar-item .gi-members { color:var(--text-muted);font-size:10px;margin-top:3px; }
 
@@ -231,7 +232,17 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 .context-menu-item { padding: 6px 12px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .context-menu-item:hover { background: var(--accent-dim); color: #fff; }
 .context-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
-#selection-badge { position:absolute; bottom:28px; left:12px; z-index:70; background:var(--accent-dim); border:1px solid var(--accent); color:#fff; font-size:11px; font-weight:600; padding:3px 10px; border-radius:12px; display:none; align-items:center; gap:8px; box-shadow:var(--shadow); }
+#focus-bar { position:absolute; top:8px; left:12px; z-index:70; background:var(--bg-secondary); border:1px solid var(--accent); border-radius:var(--radius); padding:5px 10px; display:none; align-items:center; gap:8px; font-size:11px; box-shadow:var(--shadow); max-width:70%; }
+#focus-bar.active { display:flex; }
+#focus-bar .fb-crumb { cursor:pointer; color:var(--accent); white-space:nowrap; }
+#focus-bar .fb-crumb:hover { text-decoration:underline; }
+#focus-bar .fb-sep { color:var(--text-muted); }
+#focus-bar .fb-cur { color:var(--text-primary); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#focus-bar .fb-exit { cursor:pointer; color:var(--text-secondary); font-size:14px; margin-left:4px; }
+#focus-bar .fb-exit:hover { color:var(--red); }
+
+#selection-badge { position:absolute;
+ bottom:28px; left:12px; z-index:70; background:var(--accent-dim); border:1px solid var(--accent); color:#fff; font-size:11px; font-weight:600; padding:3px 10px; border-radius:12px; display:none; align-items:center; gap:8px; box-shadow:var(--shadow); }
 #selection-badge.active { display:flex; }
 #selection-badge .sb-clear { cursor:pointer; opacity:0.75; font-size:13px; }
 #selection-badge .sb-clear:hover { opacity:1; }
@@ -428,7 +439,7 @@ const STATE = {
   viewMode: 'summary',  // detail | summary | sidebyside
   anomalies: [],
 dataShape: 'fromto', // 'fromto' | 'entity'
-  filters: { dateMin: null, dateMax: null, amountMin: null, amountMax: null, entities: [], type: '', direction: '' },
+  filters: { dateMin: null, dateMax: null, amountMin: null, amountMax: null, entities: [], type: '', direction: '', focus: null },
   mainEntity: '',
   selectedElements: new Set(),
   nodeIcons: {},        // entity -> uploaded image dataURL
@@ -790,7 +801,9 @@ function buildDOM() {
           <div class="graph-divider" id="graph-divider" style="display:none"></div>
           <div class="cy-container" id="cy-summary-wrap"><div class="cy-canvas" id="cy-summary"></div><div class="cy-close" id="close-summary" title="Close">&times;</div></div>
         </div>
-        <div id="selection-badge"><span id="sb-text"></span><span class="sb-clear" id="sb-clear" title="Clear selection">&times;</span></div>
+                <div id="focus-bar"></div>
+        <div id="selection-badge"><span id="sb-text"></span>
+        <span class="sb-clear" id="sb-clear" title="Clear selection">&times;</span></div>
         <div id="graph-hints" style="position:absolute;bottom:0;left:0;right:0;z-index:60;padding:5px 12px;background:rgba(22,27,34,0.9);border-top:1px solid var(--border);font-size:11px;color:#ffffff;display:flex;gap:18px;pointer-events:none;">
           <span><b>Click</b> select</span>
           <span><b>Shift+Click</b> add / remove</span>
@@ -798,6 +811,8 @@ function buildDOM() {
           <span><b>Drag</b> background to pan</span>
           <span><b>Right-click</b> options (applies to selection)</span>
           <span><b>Select 2+ → right-click → Group</b></span>
+          <span><b>Double-click</b> expand / collapse a group</span>
+          <span><b>Right-click → Focus</b> filter to the selection</span>
           <span><b>Esc</b> clear</span>
         </div>
         <div id="detail-panel"><div class="detail-header"><strong id="detail-title">Details</strong><button class="icon-btn" id="detail-close">&times;</button></div><div class="detail-body" id="detail-body"></div></div>
@@ -2459,8 +2474,17 @@ function getFilteredTransactions() {
   if (STATE.filters.direction === 'in' && t.to !== STATE.mainEntity) return false;
   if (STATE.filters.direction === 'out' && t.from !== STATE.mainEntity) return false;
 }                                                                                                                                                             
-      return true;                                                                                                                                                  
-    });                                                                                                                                                             
+      if (STATE.filters.focus) {
+        const f = STATE.filters.focus;
+        const set = f._set || (f._set = new Set(f.entities));
+        if (f.mode === 'with') {
+          if (!set.has(t.from) && !set.has(t.to)) return false;
+        } else {
+          if (!set.has(t.from) || !set.has(t.to)) return false;
+        }
+      }
+      return true;
+    });
   }
 
 function buildGraphElements(txns, mode) {                                                                                                                         
@@ -2809,6 +2833,14 @@ function getCyStyle() {
       }
     },
     {
+      selector: 'node[?inExpandedGroup]',
+      style: {
+        'border-color': 'data(groupHalo)',
+        'border-width': 5,
+        'border-style': 'double',
+      }
+    },
+    {
       selector: 'node:selected',
       style: {
         'border-color': '#f0a500',
@@ -2901,39 +2933,29 @@ function renderCy(container, elements, mode) {
   });
   cy.on('mouseout', () => { tooltip.style.display = 'none'; });
 
-  // snapshot the selection BEFORE cytoscape handles the click
-  // (capture phase runs ahead of cytoscape's own mousedown listener)
-  let _preTapSel = new Set();
-  document.getElementById(container).addEventListener('mousedown', () => {
-    _preTapSel = new Set(cy.$(':selected').map(x => x.id()));
-  }, true);
 
   // Click = select only this. Shift+Click = add / remove.
   cy.on('tap', 'node', e => {
     const node = e.target;
     const additive = e.originalEvent && (e.originalEvent.shiftKey || e.originalEvent.metaKey || e.originalEvent.ctrlKey);
-    if (additive) {
-      if (_preTapSel.has(node.id())) node.unselect(); else node.select();
-    } else {
+    // additive: cytoscape's 'additive' selectionType already added it — leave it alone
+    if (!additive) {
       cy.elements().not(node).unselect();
-      node.select();
+      if (!node.selected()) node.select();
     }
     syncSelection(cy);
-    highlightSelection(cy);
   });
 
   // Click edge -> select it and show detail panel
   cy.on('tap', 'edge', e => {
     const edge = e.target;
     const additive = e.originalEvent && (e.originalEvent.shiftKey || e.originalEvent.metaKey || e.originalEvent.ctrlKey);
-    if (additive) {
-      if (_preTapSel.has(edge.id())) edge.unselect(); else edge.select();
-    } else {
+    if (!additive) {
       cy.elements().not(edge).unselect();
-      edge.select();
+      if (!edge.selected()) edge.select();
     }
     syncSelection(cy);
-    showEdgeDetail(edge.data(), mode);
+    if (!additive) showEdgeDetail(edge.data(), mode);
   });
 
   // Click background -> clear everything
@@ -2943,6 +2965,14 @@ function renderCy(container, elements, mode) {
       clearSelection();
       hideDetailPanel();
     }
+  });
+
+  // Double-click a group node to expand, or a grouped member to collapse
+  cy.on('dbltap', 'node', e => {
+    const d = e.target.data();
+    if (d.isGroup) { toggleGroupCollapsed(d.groupId); return; }
+    const g = getEntityGroup(e.target.id());
+    if (g) toggleGroupCollapsed(g.id);
   });
 
   // Right-click context menu
@@ -2957,7 +2987,7 @@ function renderCy(container, elements, mode) {
     if (STATE._syncingSelection) return;
     syncSelection(cy);
   });
-  cy.on('boxend', () => { syncSelection(cy); highlightSelection(cy); });
+  cy.on('boxend', () => { syncSelection(cy); });
 
   // Restore saved positions if available
 let positionsRestored = false;
@@ -3348,16 +3378,85 @@ function clearSelection() {
   updateSelectionBadge();
 }
 
-/* dim everything except the selected nodes and their immediate neighbourhood */
+
+/* outline the selection's neighbourhood without dimming the rest */
 function highlightSelection(cy) {
-  cy.elements().removeClass('highlighted dimmed');
+  cy.elements().removeClass('highlighted');
   const sel = cy.$('node:selected');
   if (sel.length === 0) return;
-  cy.elements().addClass('dimmed');
-  sel.removeClass('dimmed').addClass('highlighted');
-  sel.connectedEdges().removeClass('dimmed').addClass('highlighted');
-  sel.neighborhood('node').removeClass('dimmed').addClass('highlighted');
+  sel.connectedEdges().addClass('highlighted');
+  sel.neighborhood('node').addClass('highlighted');
 }
+
+/* ==========================================================================
+   FOCUS (ISOLATE AS A FILTER)
+   ========================================================================== */
+function enterFocus(entityIds, mode, label) {
+  // expand any group nodes into their members
+  const ents = new Set();
+  entityIds.forEach(id => {
+    if (id.startsWith('__group__')) {
+      const g = STATE.groups.get(id.replace('__group__', ''));
+      if (g) g.members.forEach(m => ents.add(m));
+    } else ents.add(id);
+  });
+  if (!ents.size) return;
+
+  if (!STATE._focusStack) STATE._focusStack = [];
+  STATE._focusStack.push({
+    entities: Array.from(ents),
+    mode: mode || 'between',
+    label: label || (ents.size === 1 ? Array.from(ents)[0] : `${ents.size} entities`),
+  });
+  STATE.filters.focus = STATE._focusStack[STATE._focusStack.length - 1];
+
+  clearSelection();
+  STATE._skipPositionRestore = false;
+  renderGraphs();
+  buildFocusBar();
+  setTimeout(() => { const cy = getActiveCy(); if (cy) cy.fit(undefined, 40); }, 60);
+}
+
+function exitFocus(toLevel) {
+  if (!STATE._focusStack) STATE._focusStack = [];
+  if (toLevel == null) STATE._focusStack = [];
+  else STATE._focusStack = STATE._focusStack.slice(0, toLevel);
+  STATE.filters.focus = STATE._focusStack.length ? STATE._focusStack[STATE._focusStack.length - 1] : null;
+  renderGraphs();
+  buildFocusBar();
+  setTimeout(() => { const cy = getActiveCy(); if (cy) cy.fit(undefined, 40); }, 60);
+}
+
+function buildFocusBar() {
+  const bar = $('#focus-bar');
+  if (!bar) return;
+  const stack = STATE._focusStack || [];
+  bar.innerHTML = '';
+  if (!stack.length) { bar.classList.remove('active'); return; }
+
+  const all = el('span', {className: 'fb-crumb', textContent: `All (${STATE.entities.size})`, title: 'Back to the full chart'});
+  all.addEventListener('click', () => exitFocus(0));
+  bar.appendChild(all);
+
+  stack.forEach((f, i) => {
+    bar.appendChild(el('span', {className: 'fb-sep', textContent: '›'}));
+    const last = i === stack.length - 1;
+    const txt = `${f.label}${f.mode === 'with' ? ' + partners' : ''}`;
+    if (last) {
+      bar.appendChild(el('span', {className: 'fb-cur', textContent: txt, title: f.entities.join(', ')}));
+    } else {
+      const c = el('span', {className: 'fb-crumb', textContent: txt, title: f.entities.join(', ')});
+      c.addEventListener('click', () => exitFocus(i + 1));
+      bar.appendChild(c);
+    }
+  });
+
+  const x = el('span', {className: 'fb-exit', innerHTML: '&times;', title: 'Exit focus (Esc Esc)'});
+  x.addEventListener('click', () => exitFocus(0));
+  bar.appendChild(x);
+  bar.classList.add('active');
+}
+
 /* ==========================================================================
    CONTEXT MENU
    ========================================================================== */
@@ -3403,6 +3502,11 @@ if (type === 'node') {
       if (target.data('isGroup')) {
         menu.appendChild(el('div', {
           className: 'context-menu-item group-action',
+          innerHTML: '&#9633; Expand group (show members)',
+          onClick: () => { hideContextMenu(); setGroupCollapsed(target.data('groupId'), false); }
+        }));
+        menu.appendChild(el('div', {
+          className: 'context-menu-item group-action',
           innerHTML: `&#9998; Edit Group: ${escHtml(target.data('label').split('\n')[0])}`,
           onClick: () => { hideContextMenu(); openGroupModal(null, target.data('groupId')); }
         }));
@@ -3412,14 +3516,44 @@ if (type === 'node') {
           onClick: () => { hideContextMenu(); showGroupDetail(target.data()); }
         }));
       }
+      if (!target.data('isGroup')) {
+        const memberOf = getEntityGroup(target.id());
+        if (memberOf && memberOf.collapsed === false) {
+          menu.appendChild(el('div', {
+            className: 'context-menu-item group-action',
+            innerHTML: `&#9632; Collapse group: ${escHtml(memberOf.name)}`,
+            onClick: () => { hideContextMenu(); setGroupCollapsed(memberOf.id, true); }
+          }));
+        }
+      }
       menu.appendChild(el('div', {className: 'context-menu-divider'}));
-     menu.appendChild(el('div', {className: 'context-menu-item', textContent: 'Isolate (show connections only)', onClick: () => {
-        hideContextMenu();
-        cy.elements().addClass('dimmed');
-        target.removeClass('dimmed').addClass('highlighted');
-        target.connectedEdges().removeClass('dimmed').addClass('highlighted');
-        target.neighborhood('node').removeClass('dimmed').addClass('highlighted');
-      }}));                                                                                                                                                         
+      const focusLabel = targets.length > 1
+        ? `${targets.length} entities`
+        : resolveDisplayName(target.id());
+
+      menu.appendChild(el('div', {
+        className: 'context-menu-item',
+        innerHTML: `&#128269; Focus on ${targets.length > 1 ? 'these ' + targets.length : 'this'} — flows between only`,
+        title: 'Filter the chart down to transactions where BOTH sides are selected',
+        onClick: () => { hideContextMenu(); enterFocus(targets, 'between', focusLabel); }
+      }));
+      menu.appendChild(el('div', {
+        className: 'context-menu-item',
+        innerHTML: `&#128269; Focus on ${targets.length > 1 ? 'these ' + targets.length : 'this'} + partners`,
+        title: 'Filter to every transaction touching the selection, including its counterparties',
+        onClick: () => { hideContextMenu(); enterFocus(targets, 'with', focusLabel); }
+      }));
+      menu.appendChild(el('div', {
+        className: 'context-menu-item',
+        textContent: 'Highlight neighbourhood (no filter)',
+        onClick: () => {
+          hideContextMenu();
+          cy.elements().addClass('dimmed');
+          target.removeClass('dimmed').addClass('highlighted');
+          target.connectedEdges().removeClass('dimmed').addClass('highlighted');
+          target.neighborhood('node').removeClass('dimmed').addClass('highlighted');
+        }
+      }));                                                                                                                                                        
                                                                                                                                                                     
       // Layout from this entity
       menu.appendChild(el('div', {className: 'context-menu-divider'}));
@@ -4546,7 +4680,7 @@ async function saveAsPNG() {
    ========================================================================== */
 function bindGlobalEvents() {
   // Close buttons
-  $('#detail-close').addEventListener('click', hideDetailPanel);  $('#detail-close').addEventListener('click', hideDetailPanel);
+  $('#detail-close').addEventListener('click', hideDetailPanel);
   $('#qc-close').addEventListener('click', () => $('#qc-panel').classList.remove('active'));
   $('#qc-copy').addEventListener('click', () => {
     navigator.clipboard.writeText(qcPanelText()).then(() => alert('QC figures copied.'));
@@ -4607,7 +4741,10 @@ bindTimelineResizer();
       $('#edge-label-modal').classList.remove('active');
       const cy = getActiveCy();
       if (cy) cy.elements().removeClass('highlighted dimmed tl-dimmed anomaly-highlight path-highlight tl-current tl-played');
+      const hadSel = STATE.selectedElements.size > 0;
       clearSelection();
+      // second Esc (nothing was selected) exits focus
+      if (!hadSel && STATE._focusStack && STATE._focusStack.length) exitFocus(0);
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       const cy = getActiveCy();
@@ -4631,14 +4768,57 @@ bindTimelineResizer();
 /* ==========================================================================
    GROUP MANAGEMENT
    ========================================================================== */
+/* the group an entity belongs to, regardless of collapsed state */
 function getEntityGroup(entityName) {
   for (const [id, g] of STATE.groups) { if (g.members.has(entityName)) return g; }
   return null;
 }
+/* only a COLLAPSED group replaces its members on the chart */
+function getCollapsedGroup(entityName) {
+  const g = getEntityGroup(entityName);
+  return (g && g.collapsed !== false) ? g : null;
+}
 function getGroupNodeId(group) { return `__group__${group.id}`; }
 function resolveEntityToGroupNode(entityName) {
-  const g = getEntityGroup(entityName);
+  const g = getCollapsedGroup(entityName);
   return g ? getGroupNodeId(g) : entityName;
+}
+
+function setGroupCollapsed(groupId, collapsed) {
+  const g = STATE.groups.get(groupId);
+  if (!g) return;
+  const cy = getActiveCy();
+  const pos = cy ? currentPositions() : {};
+  const groupNodeId = getGroupNodeId(g);
+
+  if (collapsed) {
+    // collapsing: put the group node at the centroid of its members
+    let cx = 0, cy2 = 0, n = 0;
+    g.members.forEach(m => { if (pos[m]) { cx += pos[m].x; cy2 += pos[m].y; n++; } });
+    if (n) pos[groupNodeId] = {x: cx / n, y: cy2 / n};
+  } else {
+    // expanding: fan the members out around where the group node was
+    const gp = pos[groupNodeId];
+    if (gp) {
+      const members = Array.from(g.members);
+      const r = Math.max(70, members.length * 14);
+      members.forEach((m, i) => {
+        const a = (2 * Math.PI * i) / members.length;
+        pos[m] = {x: gp.x + Math.cos(a) * r, y: gp.y + Math.sin(a) * r};
+      });
+    }
+  }
+
+  g.collapsed = collapsed;
+  STATE._persistentPositions = pos;
+  STATE._savedPositions = pos;
+  renderGraphs();
+  buildGroupsSidebarSection();
+}
+
+function toggleGroupCollapsed(groupId) {
+  const g = STATE.groups.get(groupId);
+  if (g) setGroupCollapsed(groupId, g.collapsed === false);
 }
 
 function openGroupModal(memberNames, existingGroupId) {
@@ -4751,7 +4931,7 @@ function renderMembers() {
     } else {
       STATE._groupCounter++;
       const id = `grp_${STATE._groupCounter}`;
-      STATE.groups.set(id, { id, name, members: new Set(workingMembers), color });
+      STATE.groups.set(id, { id, name, members: new Set(workingMembers), color, collapsed: true });
       editingId = id; // so we can build the group node ID below
     }
 
@@ -4789,11 +4969,28 @@ function showGroupDetail(data) {
 
 function applyGroupsToElements(nodes, edges) {
   if (STATE.groups.size === 0) return {nodes, edges};
+
+  // mark members of EXPANDED groups so they render with a halo
+  STATE.groups.forEach(g => {
+    if (g.collapsed === false) {
+      nodes.forEach(n => {
+        if (g.members.has(n.data.id)) {
+          n.data.inExpandedGroup = true;
+          n.data.groupHalo = g.color;
+          n.data.groupId = g.id;
+        }
+      });
+    }
+  });
+
+  const collapsedGroups = Array.from(STATE.groups.values()).filter(g => g.collapsed !== false);
+  if (collapsedGroups.length === 0) return {nodes, edges};
+
   const groupedEntitySet = new Set();
-  STATE.groups.forEach(g => g.members.forEach(m => groupedEntitySet.add(m)));
+  collapsedGroups.forEach(g => g.members.forEach(m => groupedEntitySet.add(m)));
   const filteredNodes = nodes.filter(n => !groupedEntitySet.has(n.data.id));
   const groupNodes = [];
-  STATE.groups.forEach(g => {
+  collapsedGroups.forEach(g => {
     let totalIn = 0, totalOut = 0, txnCount = 0; const memberList = [];
     g.members.forEach(m => { const eData = STATE.entities.get(m); if (eData) { totalIn += eData.totalIn; totalOut += eData.totalOut; txnCount += eData.txnCount; memberList.push(m); } });
     const sz = typeof STATE.nodeSize === 'number' ? Math.max(STATE.nodeSize, 55) : 55;
@@ -4821,6 +5018,7 @@ function applyGroupsToElements(nodes, edges) {
 }
 
 function buildGroupsSidebarSection() {
+  const hint = el('div', {style: 'font-size:10px;color:var(--text-muted);padding:4px 12px 8px;line-height:1.6', innerHTML: '&#9432; <b>Create:</b> select 2+ entities (Shift+Click), right-click → Group — or + New above.<br>&#9432; <b>Expand / collapse:</b> double-click a group node or a member, or use the buttons below.'});
   const existing = $('#groups-sidebar-section'); if (existing) existing.remove();
   const sb = $('#left-sidebar'); if (!sb) return;
   const section = el('div', {className: 'sidebar-section', id: 'groups-sidebar-section'});
@@ -4828,17 +5026,21 @@ function buildGroupsSidebarSection() {
   header.innerHTML = `Groups <span class="group-node-badge">${STATE.groups.size}</span> <button class="sm" id="btn-new-group" style="margin-left:auto;margin-right:8px">+ New</button><span class="chevron">&#9662;</span>`;
   const body = el('div', {className: 'sidebar-body', style: 'gap:4px'});
   if (STATE.groups.size === 0) {
-    body.appendChild(el('div', {style: 'font-size:11px;color:var(--text-muted)', textContent: 'No groups yet. Select nodes and right-click to create a group.'}));
+    body.appendChild(el('div', {style: 'font-size:11px;color:var(--text-muted)', textContent: 'No groups yet.'}));
   } else {
     STATE.groups.forEach(g => {
       const item = el('div', {className: 'group-sidebar-item'});
-      item.innerHTML = `<div class="gi-header"><span class="gi-name" style="color:${g.color}">${escHtml(g.name)}</span><button class="sm" data-gid="${g.id}">&#9998;</button></div><div class="gi-members">${Array.from(g.members).join(', ')}</div>`;
-      item.querySelector('button').addEventListener('click', () => openGroupModal(null, g.id));
+      const isCol = g.collapsed !== false;
+      item.innerHTML = `<div class="gi-header"><span class="gi-name" style="color:${g.color}">${escHtml(g.name)}</span>` +
+        `<button class="sm gi-toggle" title="${isCol ? 'Expand — show members' : 'Collapse — merge into one node'}">${isCol ? '&#9633; Expand' : '&#9632; Collapse'}</button>` +
+        `<button class="sm gi-edit" title="Edit group">&#9998;</button></div>` +
+        `<div class="gi-members">${isCol ? '' : '<span style="color:var(--accent)">expanded · </span>'}${Array.from(g.members).join(', ')}</div>`;
+      item.querySelector('.gi-toggle').addEventListener('click', e => { e.stopPropagation(); toggleGroupCollapsed(g.id); });
+      item.querySelector('.gi-edit').addEventListener('click', e => { e.stopPropagation(); openGroupModal(null, g.id); });
       body.appendChild(item);
     });
   }
   header.addEventListener('click', e => { if (e.target.tagName === 'BUTTON') return; body.classList.toggle('collapsed'); header.querySelector('.chevron').classList.toggle('collapsed'); });
-  const hint = el('div', {style: 'font-size:10px;color:var(--text-muted);padding:4px 12px 8px;line-height:1.6', innerHTML: '&#9432; Select entities (Shift+Click or Shift+Drag), then right-click → Group. Or use + New above.'});
   section.appendChild(header); section.appendChild(hint); section.appendChild(body);
   const firstSection = sb.querySelector('.sidebar-section');
   if (firstSection) sb.insertBefore(section, firstSection); else sb.appendChild(section);
@@ -5341,7 +5543,7 @@ const VISUAL_KEYS = [
   'nodeSizes','edgeWidths',
   'nodeScaleMode','nodeScaleLog','nodeSizeMult',
   'edgeScaleMode','edgeScaleLog','edgeSizeMult',
-  'labelPosition','roundNumbers','showTimeline',
+  'labelPosition','roundNumbers','showTimeline','_focusStack',
   'timelineTimezone','timelineZoom','timelineHeight','timelineAxisMode',
   'timelineLineMode','timelineSourceColors','timelineDotScale','timelineLineScale',
   'timelineArrowSize','timelineAxisFont','_timelineEntityOrder',
@@ -5375,7 +5577,7 @@ function captureChart(name) {
       dateMax: STATE.filters.dateMax ? STATE.filters.dateMax.toISOString() : null,
     },
     groups: Array.from(STATE.groups.values()).map(g => ({
-      id: g.id, name: g.name, color: g.color, members: Array.from(g.members)
+      id: g.id, name: g.name, color: g.color, members: Array.from(g.members), collapsed: g.collapsed !== false
     })),
     groupCounter: STATE._groupCounter,
     annotations: clone(STATE.annotations),
@@ -5393,9 +5595,12 @@ function applyChart(snap) {
 
   STATE.groups = new Map();
   (snap.groups || []).forEach(g => {
-    STATE.groups.set(g.id, {id: g.id, name: g.name, color: g.color, members: new Set(g.members)});
+    STATE.groups.set(g.id, {id: g.id, name: g.name, color: g.color, members: new Set(g.members), collapsed: g.collapsed !== false});
   });
   STATE._groupCounter = snap.groupCounter || 0;
+  STATE._focusStack = clone(snap.visual._focusStack) || [];
+  STATE._focusStack.forEach(f => delete f._set);
+  STATE.filters.focus = STATE._focusStack.length ? STATE._focusStack[STATE._focusStack.length - 1] : null;
 
   STATE.annotations = clone(snap.annotations) || [];
   STATE._persistentPositions = clone(snap.positions) || {};
@@ -5411,6 +5616,7 @@ function applyChart(snap) {
   syncControlsFromState();
   applyViewModeUI();
   renderGraphs();
+  buildFocusBar();
 }
 
 function applyViewModeUI() {
@@ -5533,6 +5739,8 @@ function resetFiltersForDataset() {
   STATE.filters.entities = [];
   STATE.filters.type = '';
   STATE.filters.direction = '';
+  STATE.filters.focus = null;
+  STATE._focusStack = [];
   if (STATE.mainEntity && !STATE.entities.has(STATE.mainEntity)) STATE.mainEntity = '';
   STATE.layoutRootEntity = STATE.mainEntity || null;
   if ((STATE.layoutName === 'radial' || STATE.layoutName === 'hierarchy_from') && !STATE.mainEntity) {
