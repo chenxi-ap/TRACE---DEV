@@ -232,6 +232,11 @@ label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-tr
 .context-menu-item { padding: 6px 12px; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .context-menu-item:hover { background: var(--accent-dim); color: #fff; }
 .context-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+#graph-hints.hidden { display:none !important; }
+#hints-toggle { position:absolute; bottom:8px; left:12px; z-index:72; width:22px; height:22px; border-radius:50%; background:var(--bg-tertiary); border:1px solid var(--border); color:var(--text-secondary); font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
+#hints-toggle:hover { color:#fff; background:var(--accent-dim); border-color:var(--accent); }
+#selection-badge.low { bottom:8px; left:42px; }
+
 #focus-bar { position:absolute; top:8px; left:12px; z-index:70; background:var(--bg-secondary); border:1px solid var(--accent); border-radius:var(--radius); padding:5px 10px; display:none; align-items:center; gap:8px; font-size:11px; box-shadow:var(--shadow); max-width:70%; }
 #focus-bar.active { display:flex; }
 #focus-bar .fb-crumb { cursor:pointer; color:var(--accent); white-space:nowrap; }
@@ -473,7 +478,9 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   _tlPlayInterval: null,
   _tlRefresh: null,
   edgeColor: '#58a6ff',
-  nodeColor: '#58a6ff',
+  nodeColor: '#e6edf3',
+  typeColors: {},            // transaction type -> color
+  colorLinksByType: false,
   inColor: '#3fb950',
   outColor: '#f85149',
   useDirectionColors: false,
@@ -522,8 +529,9 @@ dataShape: 'fromto', // 'fromto' | 'entity'
   _wizardMode: 'initial',   // initial | swap | newchart
 };
 const DEFAULTS = {                                                                                                                                                
-    nodeShape: 'ellipse', nodeSize: 45, nodeColor: '#58a6ff',                                                                                                       
-    edgeColor: '#58a6ff', showArrows: true, arrowSize: 2,                                                                                                           
+    nodeShape: 'ellipse', nodeSize: 45, nodeColor: '#e6edf3',
+    edgeColor: '#58a6ff', showArrows: true, arrowSize: 2,
+    colorLinksByType: false,                                                                                                          
     edgeThicknessScale: true, useDirectionColors: false,                                                                                                            
     inColor: '#3fb950', outColor: '#f85149',                                                                                                                        
     fontSize: 12, labelPosition: 'bottom', showLegend: true, 
@@ -801,10 +809,12 @@ function buildDOM() {
           <div class="graph-divider" id="graph-divider" style="display:none"></div>
           <div class="cy-container" id="cy-summary-wrap"><div class="cy-canvas" id="cy-summary"></div><div class="cy-close" id="close-summary" title="Close">&times;</div></div>
         </div>
-                <div id="focus-bar"></div>
+                        <div id="focus-bar"></div>
+        <button id="hints-toggle" title="Show keyboard &amp; mouse shortcuts">?</button>
         <div id="selection-badge"><span id="sb-text"></span>
         <span class="sb-clear" id="sb-clear" title="Clear selection">&times;</span></div>
-        <div id="graph-hints" style="position:absolute;bottom:0;left:0;right:0;z-index:60;padding:5px 12px;background:rgba(22,27,34,0.9);border-top:1px solid var(--border);font-size:11px;color:#ffffff;display:flex;gap:18px;pointer-events:none;">
+                <div id="graph-hints" class="hidden" style="position:absolute;bottom:0;left:38px;right:0;z-index:60;padding:5px 12px;
+                background:rgba(22,27,34,0.9);border-top:1px solid var(--border);font-size:11px;color:#ffffff;display:flex;gap:18px;pointer-events:none;">
           <span><b>Click</b> select</span>
           <span><b>Shift+Click</b> add / remove</span>
           <span><b>Shift+Drag</b> box-select</span>
@@ -1389,6 +1399,7 @@ function processData() {
 
   qc.rowsUsed = STATE.transactions.length;
   STATE.qc = qc;
+  assignTypeColors();
 
   runAnomalyDetection();
   hideLoading();
@@ -1977,7 +1988,7 @@ function buildLeftSidebar() {
               <div class="sidebar-row" id="node-mult-row" style="display:none"><label>Overall Size</label>
                 <input type="range" id="s-node-mult" min="0.4" max="2.5" step="0.05" value="1" style="flex:1"><span id="s-node-mult-val">1.0×</span>
               </div>                                                                                                                                                
-              <div class="sidebar-row"><label>Color</label><input type="color" id="s-node-color" value="#58a6ff" class="color-input"></div>                         
+              <div class="sidebar-row"><label>Color</label><input type="color" id="s-node-color" value="#e6edf3" class="color-input"></div>                       
               <div class="sidebar-row"><label>Icon</label><input type="file" id="s-node-icon" accept="image/*" style="font-size:11px;border:none;padding:0"></div>  
               <div style="font-size:10px;color:var(--text-muted)">Upload an image to use as node icon. Applies to selected node or all nodes.</div>                 
               <div class="sidebar-row"><label>Node Label Position</label>                                                                                           
@@ -2007,7 +2018,12 @@ function buildLeftSidebar() {
             <div class="sidebar-header" data-section="edge-style">Link Style <button class="sm" id="reset-edge-style" style="margin-left:auto;margin-right:8px;"    
       title="Reset to defaults">Reset</button><span class="chevron">&#9662;</span></div>                                                                            
             <div class="sidebar-body" data-section="edge-style">                                                                                                    
-              <div class="sidebar-row"><label>Color</label><input type="color" id="s-edge-color" value="#58a6ff" class="color-input"></div>                         
+              <div class="sidebar-row"><label>Color</label><input type="color" id="s-edge-color" value="#58a6ff" class="color-input"></div>
+              <div class="sidebar-row" id="type-color-row" style="display:none">
+                <label style="font-size:10px">Color by Type</label>
+                <label style="font-size:11px;text-transform:none;cursor:pointer"><input type="checkbox" id="s-type-colors"> Enable</label>
+              </div>
+              <div id="type-color-list" style="display:none;font-size:11px"></div>                       
               <div class="sidebar-row"><label>Arrows</label>                                                                                                        
                 <select id="s-arrows"><option value="true" selected>Show</option><option value="false">Hide</option></select>                                       
               </div>                                                                                                                                                
@@ -2093,8 +2109,10 @@ function buildLeftSidebar() {
         $('#s-lbl-desc-pos').value = STATE.linkLabel.descPosition;
         $('#s-lbl-desc-style').value = STATE.linkLabel.descStyle;
         $('#lbl-desc-opts').style.display = STATE.linkLabel.showDesc ? '' : 'none';
+        $('#s-type-colors').checked = STATE.colorLinksByType;
+        buildTypeColorList();
 
-        $$('.sidebar-header', sb).forEach(h => {                                                                                                                    
+        $$('.sidebar-header', sb).forEach(h => {                                                                                                                   
           h.addEventListener('click', e => {                                                                                                                        
             if (e.target.tagName === 'BUTTON') return;                                                                                                              
             const sec = h.dataset.section;                                                                                                                          
@@ -2162,6 +2180,11 @@ function buildLeftSidebar() {
             document.querySelectorAll('.cy-canvas').forEach(c => c.style.background = STATE.bgColor);
           }
 
+          const newTypeColors = $('#s-type-colors').checked;
+          if (newTypeColors !== STATE.colorLinksByType) {
+            STATE.colorLinksByType = newTypeColors;
+            $('#type-color-list').style.display = newTypeColors ? '' : 'none';
+          }
           STATE.linkLabel.showAmount   = $('#s-lbl-amount').checked;
           STATE.linkLabel.showCount    = $('#s-lbl-count').checked;
           STATE.linkLabel.showDesc     = $('#s-lbl-desc').checked;
@@ -2268,7 +2291,11 @@ function buildLeftSidebar() {
           $('#s-arrows').value = 'true';                                                                                                                            
           $('#s-arrow-size-range').value = DEFAULTS.arrowSize;                                                                                                      
           $('#s-arrow-size-val').textContent = DEFAULTS.arrowSize;                                                                                                  
-          $('#s-edge-thickness').value = 'true';                                                                                                                    
+          STATE.colorLinksByType = false;
+          STATE.typeColors = {};
+          assignTypeColors();
+          $('#s-type-colors').checked = false;
+          buildTypeColorList();                                                                                                                   
           $('#s-edge-width').value = 2;                                                                                                                             
           $('#s-edge-width-val').textContent = '2';                                                                                                                 
           $('#uniform-thickness-row').style.display = 'none';                                                                                                       
@@ -2285,6 +2312,38 @@ function buildLeftSidebar() {
         });                                                                                                                                                         
       }
 
+/* editable swatch per transaction type */
+function buildTypeColorList() {
+  const row = $('#type-color-row');
+  const list = $('#type-color-list');
+  if (!row || !list) return;
+  const types = allTypes();
+  if (!types.length) { row.style.display = 'none'; list.style.display = 'none'; return; }
+  row.style.display = '';
+  list.style.display = STATE.colorLinksByType ? '' : 'none';
+  list.innerHTML = '';
+  types.forEach(t => {
+    const item = el('div', {style: 'display:flex;align-items:center;gap:6px;padding:2px 0;'});
+    const pick = el('input', {type: 'color', value: STATE.typeColors[t] || STATE.edgeColor, className: 'color-input', style: 'width:26px;height:18px;flex:0 0 auto'});
+    pick.addEventListener('input', e => {
+      STATE.typeColors[t] = e.target.value;
+      updateGraphStyles();
+      if (STATE.showTimeline && STATE._tlRefresh && !STATE._tlPlayInterval) STATE._tlRefresh();
+    });
+    item.appendChild(pick);
+    item.appendChild(el('span', {textContent: t, title: t, style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'}));
+    list.appendChild(item);
+  });
+  const reset = el('button', {className: 'sm', textContent: 'Reset type colors', style: 'margin-top:6px;width:100%'});
+  reset.addEventListener('click', e => {
+    e.stopPropagation();
+    STATE.typeColors = {};
+    assignTypeColors();
+    buildTypeColorList();
+    updateGraphStyles();
+  });
+  list.appendChild(reset);
+}
 
 function highlightAnomaly(anomaly) {
   const cy = getActiveCy();
@@ -2515,18 +2574,14 @@ function buildGraphElements(txns, mode) {
       });                                                                                                                                                           
       if (mode === 'detail') {
         const eid = `e${t.id}`;
-        let color = STATE.edgeColor;
-        if (STATE.useDirectionColors && STATE.mainEntity) {
-          if (t.to === STATE.mainEntity) color = STATE.inColor;
-          else if (t.from === STATE.mainEntity) color = STATE.outColor;
-        }
-        if (STATE.edgeColors[eid]) color = STATE.edgeColors[eid];
+        const typeKey = (t.type || '').trim();
+        const color = resolveEdgeColor(eid, typeKey, t.from, t.to);
         edges.push({
           data: {
             id: eid, source: t.from, target: t.to,
             label: buildLinkLabel({id: eid, amount: t.amount, desc: t.desc}),
             amount: t.amount, date: t.date ? t.date.toLocaleDateString() : '',
-            desc: t.desc, type: t.type,
+            desc: t.desc, type: t.type, typeKey,
             thickness: STATE.edgeThicknessScale ? 2 : STATE.uniformEdgeWidth,
             color, txnId: t.id, arrowScale: arrowScale
           }
@@ -2546,18 +2601,17 @@ function buildGraphElements(txns, mode) {
       });                                                                                                                                                           
       pairs.forEach((p, key) => {
         const eid = `s_${key}`;
-        let color = STATE.edgeColor;
-        if (STATE.useDirectionColors && STATE.mainEntity) {
-          if (p.to === STATE.mainEntity) color = STATE.inColor;
-          else if (p.from === STATE.mainEntity) color = STATE.outColor;
-        }
-        if (STATE.edgeColors[eid]) color = STATE.edgeColors[eid];
+        // only colour a rolled-up link by type if every transaction in it shares one type
+        const typeSet = new Set(p.txns.map(x => (x.type || '').trim()).filter(Boolean));
+        const typeKey = (typeSet.size === 1 && p.txns.every(x => (x.type || '').trim()))
+          ? Array.from(typeSet)[0] : '';
+        const color = resolveEdgeColor(eid, typeKey, p.from, p.to);
         const descAgg = [...new Set(p.txns.map(x => (x.desc || '').trim()).filter(Boolean))].slice(0, 3).join('; ');
         edges.push({
           data: {
             id: eid, source: p.from, target: p.to,
             label: buildLinkLabel({id: eid, amount: p.total, count: p.count, desc: descAgg, isSummary: true}),
-            amount: p.total, count: p.count, descAgg,
+            amount: p.total, count: p.count, descAgg, typeKey,
             thickness: STATE.edgeThicknessScale ? 2 : STATE.uniformEdgeWidth,
             color, arrowScale: arrowScale, txns: p.txns
           }
@@ -2574,6 +2628,57 @@ function buildGraphElements(txns, mode) {
                                                                                                                                                                     
 return applyGroupsToElements(Array.from(nodes.values()), edges);
   }
+
+
+/* ==========================================================================
+   TRANSACTION TYPE COLORS
+   ========================================================================== */
+const TYPE_PALETTE = [
+  '#58a6ff', '#3fb950', '#d29922', '#bc8cff', '#f778ba',
+  '#79c0ff', '#56d364', '#e3b341', '#a371f7', '#ff7b72',
+  '#2ea043', '#db6d28',
+];
+
+/* every distinct type in the data, in order of frequency */
+function allTypes() {
+  if (!STATE.mapping.type) return [];
+  const counts = new Map();
+  STATE.transactions.forEach(t => {
+    const k = (t.type || '').trim();
+    if (!k) return;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([k]) => k);
+}
+
+/* give every type a colour, keeping any the user has chosen */
+function assignTypeColors() {
+  const types = allTypes();
+  types.forEach((t, i) => {
+    if (!STATE.typeColors[t]) STATE.typeColors[t] = TYPE_PALETTE[i % TYPE_PALETTE.length];
+  });
+}
+
+function typeColorOf(typeKey) {
+  if (!typeKey) return null;
+  return STATE.typeColors[typeKey] || null;
+}
+
+/* one colour for a link: per-link override > type > direction > base */
+function resolveEdgeColor(id, typeKey, source, target) {
+  if (STATE.edgeColors[id]) return STATE.edgeColors[id];
+  if (STATE.colorLinksByType) {
+    const c = typeColorOf(typeKey);
+    if (c) return c;
+  }
+  if (STATE.useDirectionColors && STATE.mainEntity) {
+    if (target === STATE.mainEntity) return STATE.inColor;
+    if (source === STATE.mainEntity) return STATE.outColor;
+  }
+  return STATE.edgeColor;
+}
 
 /* ==========================================================================
    SIZING ENGINE — one source of truth for node & link sizes
@@ -3106,15 +3211,7 @@ function updateGraphStyles() {
       cy.edges().forEach(edge => {                                                                                                                                      
     edge.data('arrowScale', arrowScale);                                                                                                                            
                                                                                                                                                                     
-    let color = STATE.edgeColor;
-    if (STATE.useDirectionColors && STATE.mainEntity) {
-      const src = edge.data('source');
-      const tgt = edge.data('target');
-      if (tgt === STATE.mainEntity) color = STATE.inColor;
-      else if (src === STATE.mainEntity) color = STATE.outColor;
-    }
-    if (STATE.edgeColors[edge.id()]) color = STATE.edgeColors[edge.id()];
-    edge.data('color', color);                                                                                                                                     
+    edge.data('color', resolveEdgeColor(edge.id(), edge.data('typeKey'), edge.data('source'), edge.data('target')));                                                                                                                                    
                                                                                                                                                                     
   });                                                                                                                                                           
                                                                                                                                                                     
@@ -4682,6 +4779,26 @@ function bindGlobalEvents() {
   // Close buttons
   $('#detail-close').addEventListener('click', hideDetailPanel);
   $('#qc-close').addEventListener('click', () => $('#qc-panel').classList.remove('active'));
+  (function() {
+    const hints = $('#graph-hints'), badge = $('#selection-badge'), btn = $('#hints-toggle');
+    let pinned = false;
+    try { pinned = localStorage.getItem('trace_hints_shown') === '1'; } catch (e) {}
+    const setShown = on => {
+      hints.classList.toggle('hidden', !on);
+      badge.classList.toggle('low', !on);
+      btn.style.color = on ? '#fff' : '';
+      btn.style.background = on ? 'var(--accent-dim)' : '';
+    };
+    setShown(pinned);
+    btn.addEventListener('click', () => {
+      pinned = !pinned;
+      try { localStorage.setItem('trace_hints_shown', pinned ? '1' : '0'); } catch (e) {}
+      setShown(pinned);
+    });
+    // hover peek when not pinned
+    btn.addEventListener('mouseenter', () => { if (!pinned) setShown(true); });
+    btn.addEventListener('mouseleave', () => { if (!pinned) setShown(false); });
+  })();
   $('#qc-copy').addEventListener('click', () => {
     navigator.clipboard.writeText(qcPanelText()).then(() => alert('QC figures copied.'));
   });  $('#sb-clear').addEventListener('click', () => {
@@ -5539,7 +5656,7 @@ const AUTOSAVE_KEY = 'trace_autosave_v1';
 const VISUAL_KEYS = [
   'viewMode','layoutName','layoutRootEntity','mainEntity',
   'nodeIcons','nodeShapes','nodeColors','nodeLabels',
-  'edgeColors','edgeLabels','linkLabel',
+  'edgeColors','edgeLabels','linkLabel','typeColors','colorLinksByType',
   'nodeSizes','edgeWidths',
   'nodeScaleMode','nodeScaleLog','nodeSizeMult',
   'edgeScaleMode','edgeScaleLog','edgeSizeMult',
@@ -5691,6 +5808,8 @@ function syncControlsFromState() {
   if ($('#lbl-desc-opts')) $('#lbl-desc-opts').style.display = STATE.linkLabel.showDesc ? '' : 'none';
   if ($('#lbl-desc-row') && !STATE.mapping.desc) $('#lbl-desc-row').style.display = 'none';
 
+  chk('#s-type-colors', STATE.colorLinksByType);
+  buildTypeColorList();
   chk('#s-legend', STATE.showLegend);
   set('#s-bg-color', STATE.bgColor);
 
